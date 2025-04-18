@@ -16,7 +16,7 @@ h1, h2 {
 }
 
 button {
-  @apply px-4 py-2 text-base border-0 rounded-md cursor-pointer bg-blue-500 text-white transition-colors;
+  @apply px-3 py-1 text-sm border-0 rounded shadow-sm cursor-pointer bg-blue-500 text-white transition-colors;
 }
 
 button:hover {
@@ -29,7 +29,7 @@ button:disabled {
 
 /* Audio Level Meters */
 .level-meter {
-  @apply h-6 rounded-md overflow-hidden relative w-40 border border-gray-300 bg-gray-200;
+  @apply h-4 rounded-md overflow-hidden relative border border-gray-300 bg-gray-200;
 }
 
 .level-meter-bar {
@@ -44,13 +44,7 @@ button:disabled {
   @apply bg-blue-500;
 }
 
-.download-btn {
-  @apply ml-auto px-4 py-2 text-base border-0 rounded-md cursor-pointer bg-green-500 text-white transition-colors;
-}
-
-.download-btn:hover {
-  @apply bg-green-600;
-}
+/* Removed download-btn class as it's now using the standard button styling */
 
 .status {
   @apply bg-white shadow rounded-lg p-4 mb-4 flex flex-col;

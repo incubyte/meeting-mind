@@ -26,15 +26,34 @@ const MAX_STATUS_LINES = 20;
 let lastMicLevel = 0;
 let lastSpeakerLevel = 0;
 
+// Constants from main.js for the UI
+const VAD_AMPLITUDE_THRESHOLD = 80; // Speech detection threshold
+const VAD_SILENCE_THRESHOLD = 50;   // Silence detection threshold
+const MAX_AUDIO_LEVEL = 200;        // Maximum level for scaling
+
 // Helper to map audio level to percentage for display
-function mapLevelToPercentage(level, max = 200) {
+function mapLevelToPercentage(level, max = MAX_AUDIO_LEVEL) {
   // Cap the level at max to prevent overflow
   const cappedLevel = Math.min(level, max);
   // Map to percentage (0-100)
   return (cappedLevel / max) * 100;
 }
 
-// Update the audio level meters every 100ms
+// Position the threshold indicators on the level meters
+function positionThresholdIndicators() {
+  const micThreshold = document.querySelector('.mic-threshold');
+  const speakerThreshold = document.querySelector('.speaker-threshold');
+  
+  if (micThreshold) {
+    micThreshold.style.left = `${mapLevelToPercentage(VAD_AMPLITUDE_THRESHOLD)}%`;
+  }
+  
+  if (speakerThreshold) {
+    speakerThreshold.style.left = `${mapLevelToPercentage(VAD_AMPLITUDE_THRESHOLD)}%`;
+  }
+}
+
+// Update the audio level meters every 50ms for more responsive UI
 setInterval(() => {
   // Update mic level meter
   micMeterBar.style.width = `${mapLevelToPercentage(lastMicLevel)}%`;
@@ -43,18 +62,18 @@ setInterval(() => {
   speakerMeterBar.style.width = `${mapLevelToPercentage(lastSpeakerLevel)}%`;
   
   // Add a color effect based on level
-  if (lastMicLevel > 100) {
+  if (lastMicLevel >= 80) { // Using the VAD_AMPLITUDE_THRESHOLD value
     micMeterBar.classList.add("bg-green-600");
   } else {
     micMeterBar.classList.remove("bg-green-600");
   }
   
-  if (lastSpeakerLevel > 100) {
+  if (lastSpeakerLevel >= 80) { // Using the VAD_AMPLITUDE_THRESHOLD value
     speakerMeterBar.classList.add("bg-blue-600");
   } else {
     speakerMeterBar.classList.remove("bg-blue-600");
   }
-}, 100);
+}, 50);
 
 function addStatusMessage(message) {
   console.log("Status Update:", message); // Log to console as well
@@ -447,4 +466,8 @@ window.addEventListener('beforeunload', () => {
 // Initial UI state
 stopRecordingBtn.disabled = true;
 requestAnalysisBtn.disabled = true; // Disabled until context is provided
+
+// Position the threshold indicators for audio levels
+positionThresholdIndicators();
+
 addStatusMessage("Renderer process loaded.");

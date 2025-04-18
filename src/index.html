@@ -1,4 +1,4 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
@@ -20,76 +20,145 @@
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
         <!-- Left Column: Controls + Status -->
         <div class="flex flex-col gap-4">
-          <!-- Interview Setup Section -->
-          <section class="bg-white shadow rounded-lg p-3">
-            <h2 class="text-lg font-semibold mb-3">Interview Setup</h2>
-            <div class="flex flex-col gap-3">
-              <div>
-                <label class="block mb-1 text-sm font-medium">Upload Context (PDF/Text):</label>
-                <div class="flex gap-2">
-                  <input type="file" id="contextFileInput" accept=".pdf,.txt" class="border rounded p-1 flex-grow text-sm" />
-                  <button id="uploadFileBtn" class="bg-blue-500 hover:bg-blue-600 text-sm py-1 px-3">Upload</button>
-                </div>
-              </div>
-              <div>
-                <label class="block mb-1 text-sm font-medium">Or Enter Context Directly:</label>
-                <textarea id="contextTextArea" class="w-full h-24 border rounded p-2 text-sm" 
-                  placeholder="Enter interview context, job description, or candidate information here..."></textarea>
-              </div>
-              <div class="flex items-center gap-2">
-                <button id="saveContextBtn" class="bg-blue-500 hover:bg-blue-600 text-sm py-1 px-3">Save Context</button>
-                <span id="contextStatus" class="italic text-gray-500 text-sm"></span>
-              </div>
-            </div>
-          </section>
-
           <!-- Controls Section -->
           <section class="bg-white shadow rounded-lg p-3">
             <h2 class="text-lg font-semibold mb-3">Controls</h2>
             <div class="flex flex-wrap gap-3 items-center">
               <div class="flex gap-2">
-                <button id="testAudioBtn" class="bg-purple-500 hover:bg-purple-600 text-sm py-1 px-3">Test Audio</button>
-                <button id="startRecordingBtn" class="bg-green-500 hover:bg-green-600 text-sm py-1 px-3">Start</button>
-                <button id="stopRecordingBtn" disabled class="bg-red-500 hover:bg-red-600 text-sm py-1 px-3">Stop</button>
+                <button
+                  id="testAudioBtn"
+                  class="bg-purple-500 hover:bg-purple-600 text-sm py-1 px-3"
+                >
+                  Test Audio
+                </button>
+                <button
+                  id="startRecordingBtn"
+                  class="bg-green-500 hover:bg-green-600 text-sm py-1 px-3"
+                >
+                  Start
+                </button>
+                <button
+                  id="stopRecordingBtn"
+                  disabled
+                  class="bg-red-500 hover:bg-red-600 text-sm py-1 px-3"
+                >
+                  Stop
+                </button>
               </div>
-              
+
               <div class="flex items-center gap-3 mt-2 w-full">
                 <div class="flex items-center gap-2 flex-1">
                   <span class="text-sm whitespace-nowrap">Mic:</span>
-                  <div id="micMeter" class="level-meter mic-meter flex-1">
-                    <div id="micMeterBar" class="level-meter-bar" style="width: 0%"></div>
+                  <div id="micMeter" class="level-meter mic-meter flex-1 relative">
+                    <div
+                      id="micMeterBar"
+                      class="level-meter-bar"
+                      style="width: 0%"
+                    ></div>
+                    <div class="threshold-line mic-threshold absolute h-full" style="left: 40%"></div>
                   </div>
                 </div>
-                
+
                 <div class="flex items-center gap-2 flex-1">
                   <span class="text-sm whitespace-nowrap">Speaker:</span>
-                  <div id="speakerMeter" class="level-meter speaker-meter flex-1">
-                    <div id="speakerMeterBar" class="level-meter-bar" style="width: 0%"></div>
+                  <div
+                    id="speakerMeter"
+                    class="level-meter speaker-meter flex-1 relative"
+                  >
+                    <div
+                      id="speakerMeterBar"
+                      class="level-meter-bar"
+                      style="width: 0%"
+                    ></div>
+                    <div class="threshold-line speaker-threshold absolute h-full" style="left: 40%"></div>
                   </div>
                 </div>
               </div>
             </div>
           </section>
-          
+          <!-- Interview Setup Section -->
+          <section class="bg-white shadow rounded-lg p-3">
+            <h2 class="text-lg font-semibold mb-3">Interview Setup</h2>
+            <div class="flex flex-col gap-3">
+              <div>
+                <label class="block mb-1 text-sm font-medium"
+                  >Upload Context (PDF/Text):</label
+                >
+                <div class="flex gap-2">
+                  <input
+                    type="file"
+                    id="contextFileInput"
+                    accept=".pdf,.txt"
+                    class="border rounded p-1 flex-grow text-sm"
+                  />
+                  <button
+                    id="uploadFileBtn"
+                    class="bg-blue-500 hover:bg-blue-600 text-sm py-1 px-3"
+                  >
+                    Upload
+                  </button>
+                </div>
+              </div>
+              <div>
+                <label class="block mb-1 text-sm font-medium"
+                  >Or Enter Context Directly:</label
+                >
+                <textarea
+                  id="contextTextArea"
+                  class="w-full h-24 border rounded p-2 text-sm"
+                  placeholder="Enter interview context, job description, or candidate information here..."
+                ></textarea>
+              </div>
+              <div class="flex items-center gap-2">
+                <button
+                  id="saveContextBtn"
+                  class="bg-blue-500 hover:bg-blue-600 text-sm py-1 px-3"
+                >
+                  Save Context
+                </button>
+                <span
+                  id="contextStatus"
+                  class="italic text-gray-500 text-sm"
+                ></span>
+              </div>
+            </div>
+          </section>
+
           <!-- Status Section -->
-          <section class="bg-white shadow rounded-lg p-3 flex flex-col flex-grow">
+          <section
+            class="bg-white shadow rounded-lg p-3 flex flex-col flex-grow"
+          >
             <div class="mb-2">
               <h2 class="text-lg font-semibold">Status</h2>
-              <div id="recordingStatus" class="text-sm">Recording: Inactive</div>
+              <div id="recordingStatus" class="text-sm">
+                Recording: Inactive
+              </div>
             </div>
-            <pre id="statusMessages" class="h-40 overflow-auto bg-gray-50 p-2 border rounded text-xs flex-grow">App Initialized.</pre>
+            <pre
+              id="statusMessages"
+              class="h-40 overflow-auto bg-gray-50 p-2 border rounded text-xs flex-grow"
+            >
+App Initialized.</pre
+            >
           </section>
         </div>
-        
+
         <!-- Right Column: Analysis Section -->
         <section class="bg-white shadow rounded-lg p-3 flex flex-col">
           <div class="flex justify-between items-center mb-2">
             <h2 class="text-lg font-semibold">Analysis & Suggestions</h2>
-            <button id="requestAnalysisBtn" disabled class="bg-yellow-500 hover:bg-yellow-600 text-sm py-1 px-3">
+            <button
+              id="requestAnalysisBtn"
+              disabled
+              class="bg-yellow-500 hover:bg-yellow-600 text-sm py-1 px-3"
+            >
               Request Analysis
             </button>
           </div>
-          <div id="analysisOutput" class="border rounded p-3 bg-gray-50 text-sm overflow-auto flex-grow">
+          <div
+            id="analysisOutput"
+            class="border rounded p-3 bg-gray-50 text-sm overflow-auto flex-grow"
+          >
             Analysis will appear here once interview begins...
           </div>
         </section>
@@ -101,11 +170,17 @@
         <section class="bg-white shadow rounded-lg p-3 flex flex-col h-full">
           <div class="flex justify-between items-center mb-3">
             <h2 class="text-lg font-semibold">Transcript</h2>
-            <button id="downloadTranscriptBtn" class="bg-green-500 hover:bg-green-600 text-sm py-1 px-3">
+            <button
+              id="downloadTranscriptBtn"
+              class="bg-green-500 hover:bg-green-600 text-sm py-1 px-3"
+            >
               Download
             </button>
           </div>
-          <div id="transcriptOutput" class="border rounded p-3 overflow-auto flex-grow bg-gray-50">
+          <div
+            id="transcriptOutput"
+            class="border rounded p-3 overflow-auto flex-grow bg-gray-50"
+          >
             <!-- Transcript items will be added here -->
           </div>
         </section>
@@ -113,14 +188,19 @@
         <!-- Right Column: AI Analysis (duplicated for the bottom section) -->
         <section class="bg-white shadow rounded-lg p-3 flex flex-col h-full">
           <h2 class="text-lg font-semibold mb-3">Interview Insights</h2>
-          <div class="border rounded p-3 bg-gray-50 text-sm overflow-auto flex-grow">
-            Detailed interview insights and feedback will appear here after analysis...
+          <div
+            class="border rounded p-3 bg-gray-50 text-sm overflow-auto flex-grow"
+          >
+            Detailed interview insights and feedback will appear here after
+            analysis...
           </div>
         </section>
       </div>
     </main>
 
-    <footer class="border-t py-2 text-center text-xs text-gray-500 bg-white mt-auto">
+    <footer
+      class="border-t py-2 text-center text-xs text-gray-500 bg-white mt-auto"
+    >
       Meeting Mind - Live Interview Assistant
     </footer>
     <script defer src="renderer.js"></script>

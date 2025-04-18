@@ -13,8 +13,7 @@ dotenv.config(); // Load .env file
 const execPromise = promisify(exec);
 
 // --- Configuration ---
-// const MICROPHONE_DEVICE_ID = null; // Keep null to use default mic
-const RECORDING_CHUNK_DURATION_SECONDS = 7; // Increased from 5 to 7 seconds for better transcription
+const RECORDING_CHUNK_DURATION_SECONDS = 7; // Chunk duration in seconds
 const VERBOSE_LOGGING = true;
 const TEMP_AUDIO_DIR = path.join(os.tmpdir(), "meeting-mind-audio");
 const DEBUG_SAVE_RECORDINGS = true; // Save recordings for debugging
@@ -103,7 +102,7 @@ async function getDefaultPulseAudioMonitorDevice() {
 // --- Transcription Function ---
 async function transcribeAudioChunk(filePath, source) {
   logVerbose(`Transcribing ${source} chunk: ${path.basename(filePath)}`);
-
+  
   // Verify file exists and has content
   try {
     // Verify the file exists and is readable
@@ -111,44 +110,90 @@ async function transcribeAudioChunk(filePath, source) {
       logError(`Cannot transcribe non-existent file: ${filePath}`);
       return;
     }
-
+    
     const stats = fs.statSync(filePath);
     if (stats.size <= 44) { // WAV header is at least 44 bytes
       logWarn(`File too small to contain audio data: ${filePath} (${stats.size} bytes)`);
       return;
     }
-
+    
     // Read the entire file into a buffer first to avoid streaming issues
     const audioBuffer = fs.readFileSync(filePath);
     logVerbose(`Read ${audioBuffer.length} bytes from ${filePath}`);
-
+    
     // Write to a temp file with a consistent name (helps with debugging)
     const tempFilePath = path.join(TEMP_AUDIO_DIR, `${source.toLowerCase()}-upload.wav`);
     fs.writeFileSync(tempFilePath, audioBuffer);
-
+    
+    // Save a debug copy of exactly what we're sending to OpenAI
+    if (DEBUG_SAVE_RECORDINGS) {
+      const openaiSubmitFile = path.join(
+        DEBUG_RECORDINGS_DIR, 
+        `openai-submit-${source.toLowerCase()}-${Date.now()}.wav`
+      );
+      fs.copyFileSync(tempFilePath, openaiSubmitFile);
+      logVerbose(`Saved exact OpenAI submission file to: ${openaiSubmitFile}`);
+      
+      // Log file properties
+      const stats = fs.statSync(openaiSubmitFile);
+      const channelCount = source === "You" ? 1 : 2;
+      const durationSeconds = stats.size / (16000 * 2 * channelCount); // Approx duration in seconds
+      logVerbose(`OpenAI submission file properties: Size=${stats.size} bytes, ~${durationSeconds.toFixed(2)} seconds duration`);
+    }
+    
     // Process with OpenAI using a fresh file stream from our copy
+    logVerbose(`Sending ${source} audio to OpenAI Whisper API (${path.basename(filePath)})`);
+    
+    const startTime = Date.now();
     const transcriptionPromise = openai.audio.transcriptions.create({
       file: fs.createReadStream(tempFilePath),
       model: "whisper-1",
       language: "en",
+    }).then(result => {
+      const endTime = Date.now();
+      logVerbose(`OpenAI Whisper API responded in ${endTime - startTime}ms for ${source}`);
+      return result;
     });
-
+    
     // No stream error promise needed as we're using readFileSync
     const streamError = new Promise((_, reject) => {
       // Only reject if API call takes too long
       setTimeout(() => reject(new Error("Transcription timed out")), 30000);
     });
-
+    
     // Race the promises to catch stream errors
     const transcription = await Promise.race([transcriptionPromise, streamError]);
 
     logVerbose(`Transcription result for ${source}:`, transcription.text);
+    
+    // Debug: Save transcription results to file
+    if (DEBUG_SAVE_RECORDINGS) {
+      try {
+        const debugResultFile = path.join(
+          DEBUG_RECORDINGS_DIR, 
+          `debug-transcription-${source.toLowerCase()}-${Date.now()}.json`
+        );
+        fs.writeFileSync(
+          debugResultFile, 
+          JSON.stringify({
+            source: source,
+            timestamp: new Date().toISOString(),
+            filePath: filePath,
+            result: transcription,
+            text: transcription.text
+          }, null, 2)
+        );
+        logVerbose(`Saved transcription result to: ${debugResultFile}`);
+      } catch (err) {
+        logError(`Failed to save transcription result: ${err.message}`);
+      }
+    }
 
     if (transcription.text && transcription.text.trim()) {
       // Check for common placeholder responses when there's no actual speech
       const text = transcription.text.trim();
       const placeholders = ["you", "you.", "...", "…"];
-
+      
       // Only add meaningful transcriptions
       if (!placeholders.includes(text.toLowerCase())) {
         logVerbose(`Adding meaningful transcription: "${text}"`);
@@ -187,6 +232,7 @@ async function startRecording() {
     logWarn("Recording is already in progress.");
     return;
   }
+  
   logInfo("Attempting to start recording...");
   transcriptBuffer = []; // Clear previous transcript
   mainWindow.webContents.send("transcript:update", transcriptBuffer); // Clear UI
@@ -211,12 +257,24 @@ async function startRecording() {
     return;
   }
 
+  // Ensure debug directory exists if debugging enabled
+  if (DEBUG_SAVE_RECORDINGS) {
+    try {
+      if (!fs.existsSync(DEBUG_RECORDINGS_DIR)) {
+        fs.mkdirSync(DEBUG_RECORDINGS_DIR, { recursive: true });
+        logVerbose(`Created debug directory: ${DEBUG_RECORDINGS_DIR}`);
+      }
+    } catch (err) {
+      logError(`Failed to create debug directory: ${DEBUG_RECORDINGS_DIR}`, err);
+    }
+  }
+
   const commonOptions = {
     program: `rec`, // or 'arecord'
     bits: 16,
     encoding: `signed-integer`,
     format: `S16_LE`,
-    rate: 16000, // Whisper prefers 16kHz
+    rate: 44100, // Using 44.1kHz for better quality
     type: `wav`,
     silence: 0, // Important: Capture continuously
     keepSilence: true, // Keep recording even during silence
@@ -236,35 +294,103 @@ async function startRecording() {
   };
   logVerbose("Speaker recorder options:", JSON.stringify(speakerOptions));
 
+  // Create recorder instances
   micRecorder = new AudioRecorder(micOptions, VERBOSE_LOGGING ? console : undefined);
   speakerRecorder = new AudioRecorder(speakerOptions, VERBOSE_LOGGING ? console : undefined);
 
-  // --- Start Recorders First ---
+  // --- Set up the microphone first ---
+  let micStartSuccess = false;
+  let speakerStartSuccess = false;
+
   try {
+    logVerbose("Starting microphone recorder...");
     micRecorder.start();
-    logInfo("Microphone recording started.");
+    logInfo("Microphone recording started successfully.");
+    micStartSuccess = true;
   } catch (err) {
     logError("Failed to start microphone recorder:", err);
-    stopRecording(); // Clean up if one fails
     mainWindow.webContents.send("recording:status", { isRecording: false, error: "Failed to start microphone." });
-    return;
   }
 
+  // Set up microphone stream AFTER starting
+  if (micStartSuccess) {
+    logVerbose("Setting up microphone stream and event listeners...");
+    const micStream = micRecorder.stream(); // Get stream reference AFTER starting
+    
+    if (micStream) {
+      micStream.on("error", (err) => {
+        logError("Mic Recorder Stream Error:", err);
+      });
+      
+      micStream.on("close", (code) => {
+        logWarn(`Mic recording process exited (Code: ${code})`);
+      });
+      
+      micStream.on("end", () => {
+        logVerbose("Microphone recorder stream ended.");
+      });
+      
+      // Set up a direct pipe to a continuous file for testing
+      if (DEBUG_SAVE_RECORDINGS) {
+        const debugMicFile = path.join(DEBUG_RECORDINGS_DIR, `continuous-mic-${Date.now()}.wav`);
+        const debugMicStream = fs.createWriteStream(debugMicFile, { encoding: "binary" });
+        micStream.pipe(debugMicStream);
+        logInfo(`DEBUG: Writing continuous mic recording to ${debugMicFile}`);
+      }
+    } else {
+      logError("Failed to get microphone stream even after start");
+      micStartSuccess = false;
+    }
+  }
+
+  // --- Set up the speaker recording ---
   try {
+    logVerbose("Starting speaker recorder...");
     speakerRecorder.start();
-    logInfo("Speaker recording started.");
+    logInfo("Speaker recording started successfully.");
+    speakerStartSuccess = true;
   } catch (err) {
     logError("Failed to start speaker recorder:", err);
-    stopRecording(); // Clean up
     mainWindow.webContents.send("recording:status", { isRecording: false, error: "Failed to start speaker capture." });
-    return;
   }
 
-  // --- Event Listeners (AFTER start) ---
-  micRecorder.stream().on("error", (err) => logError("Mic Recorder Stream Error:", err));
-  speakerRecorder.stream().on("error", (err) => logError("Speaker Recorder Stream Error:", err));
-  micRecorder.stream().on("close", (code) => logWarn(`Mic recording process exited (Code: ${code})`));
-  speakerRecorder.stream().on("close", (code) => logWarn(`Speaker recording process exited (Code: ${code})`));
+  // Set up speaker stream AFTER starting
+  if (speakerStartSuccess) {
+    logVerbose("Setting up speaker stream and event listeners...");
+    const speakerStream = speakerRecorder.stream(); // Get stream reference AFTER starting
+    
+    if (speakerStream) {
+      speakerStream.on("error", (err) => {
+        logError("Speaker Recorder Stream Error:", err);
+      });
+      
+      speakerStream.on("close", (code) => {
+        logWarn(`Speaker recording process exited (Code: ${code})`);
+      });
+      
+      speakerStream.on("end", () => {
+        logVerbose("Speaker recorder stream ended.");
+      });
+      
+      // Set up a direct pipe to a continuous file for testing
+      if (DEBUG_SAVE_RECORDINGS) {
+        const debugSpeakerFile = path.join(DEBUG_RECORDINGS_DIR, `continuous-speaker-${Date.now()}.wav`);
+        const debugSpeakerStream = fs.createWriteStream(debugSpeakerFile, { encoding: "binary" });
+        speakerStream.pipe(debugSpeakerStream);
+        logInfo(`DEBUG: Writing continuous speaker recording to ${debugSpeakerFile}`);
+      }
+    } else {
+      logError("Failed to get speaker stream even after start");
+      speakerStartSuccess = false;
+    }
+  }
+  
+  // If neither recording started successfully, stop and return an error
+  if (!micStartSuccess && !speakerStartSuccess) {
+    stopRecording();
+    mainWindow.webContents.send("recording:status", { isRecording: false, error: "Failed to start both recordings." });
+    return;
+  }
 
   isRecording = true;
   logInfo(`Recording started. Processing chunks every ${RECORDING_CHUNK_DURATION_SECONDS} seconds.`);
@@ -275,7 +401,6 @@ async function startRecording() {
     if (!isRecording) return;
     processAudioChunk();
   }, RECORDING_CHUNK_DURATION_SECONDS * 1000);
-
 }
 
 function stopRecording() {
@@ -310,7 +435,7 @@ function stopRecording() {
     speakerRecorder = null; // Release instance
   }
 
-  // Close file streams if they were somehow left open (shouldn't happen in chunk mode)
+  // Close file streams if they were somehow left open
   if (micFileStream) {
     micFileStream.end();
     micFileStream = null;
@@ -323,178 +448,85 @@ function stopRecording() {
   isRecording = false;
   logInfo("Recording stopped.");
   mainWindow.webContents.send("recording:status", { isRecording: false });
-
-  // Optional: Process any remaining buffered audio data if needed
-  // Optional: Clean up temp directory more thoroughly if desired
 }
 
 // --- Chunk Processing Logic ---
 function processAudioChunk() {
-  if (!isRecording || !micRecorder || !speakerRecorder) return;
+  if (!isRecording) return;
 
   chunkCounter++;
   const timestamp = Date.now();
-  const micChunkFile = path.join(TEMP_AUDIO_DIR, `mic-${timestamp}-chunk-${chunkCounter}.wav`);
-  const speakerChunkFile = path.join(TEMP_AUDIO_DIR, `speaker-${timestamp}-chunk-${chunkCounter}.wav`);
-
-  logVerbose(`Processing chunk ${chunkCounter}...`);
-
-  // Generate sample data (1 second of silence at 16kHz mono or stereo)
-  // This is enough data for Whisper to recognize as valid WAV file with enough length
-  try {
-    // Mono (microphone) - 16kHz, 16-bit = 32000 bytes for 1 second of audio + 44 byte header
-    const sampleRate = 16000;
-    const bytesPerSample = 2; // 16-bit audio
-    const channels = 1; // Mono for mic
-    const durationMs = 1000; // 1 second minimum
-
-    // Calculate required buffer size
-    const dataSize = Math.floor(sampleRate * bytesPerSample * channels * (durationMs / 1000));
-    const fileSize = dataSize + 36; // 36 bytes for WAV header minus data
-
-    // Create WAV header + silent data
-    const micBuffer = Buffer.alloc(dataSize + 44); // 44 bytes header
-
-    // WAV header
-    micBuffer.write('RIFF', 0);
-    micBuffer.writeUInt32LE(fileSize, 4);
-    micBuffer.write('WAVE', 8);
-    micBuffer.write('fmt ', 12);
-    micBuffer.writeUInt32LE(16, 16); // fmt chunk size
-    micBuffer.writeUInt16LE(1, 20); // PCM format
-    micBuffer.writeUInt16LE(channels, 22); // Channels (1 for mono)
-    micBuffer.writeUInt32LE(sampleRate, 24); // Sample rate
-    micBuffer.writeUInt32LE(sampleRate * bytesPerSample * channels, 28); // Byte rate
-    micBuffer.writeUInt16LE(bytesPerSample * channels, 32); // Block align
-    micBuffer.writeUInt16LE(16, 34); // Bits per sample
-    micBuffer.write('data', 36);
-    micBuffer.writeUInt32LE(dataSize, 40);
-
-    // Fill with silence (zeros) - already done by Buffer.alloc
-    fs.writeFileSync(micChunkFile, micBuffer);
-
-    // Now for speaker (stereo)
-    const speakerChannels = 2; // Stereo for speaker
-    const speakerDataSize = Math.floor(sampleRate * bytesPerSample * speakerChannels * (durationMs / 1000));
-    const speakerFileSize = speakerDataSize + 36;
-
-    const speakerBuffer = Buffer.alloc(speakerDataSize + 44);
-
-    // WAV header for stereo
-    speakerBuffer.write('RIFF', 0);
-    speakerBuffer.writeUInt32LE(speakerFileSize, 4);
-    speakerBuffer.write('WAVE', 8);
-    speakerBuffer.write('fmt ', 12);
-    speakerBuffer.writeUInt32LE(16, 16); // fmt chunk size
-    speakerBuffer.writeUInt16LE(1, 20); // PCM format
-    speakerBuffer.writeUInt16LE(speakerChannels, 22); // Channels (2 for stereo)
-    speakerBuffer.writeUInt32LE(sampleRate, 24); // Sample rate
-    speakerBuffer.writeUInt32LE(sampleRate * bytesPerSample * speakerChannels, 28); // Byte rate
-    speakerBuffer.writeUInt16LE(bytesPerSample * speakerChannels, 32); // Block align
-    speakerBuffer.writeUInt16LE(16, 34); // Bits per sample
-    speakerBuffer.write('data', 36);
-    speakerBuffer.writeUInt32LE(speakerDataSize, 40);
-
-    // Fill with silence (zeros) - already done by Buffer.alloc
-    fs.writeFileSync(speakerChunkFile, speakerBuffer);
-
-    logVerbose(`Created starter WAV files for chunk ${chunkCounter} - Mic: ${micBuffer.length} bytes, Speaker: ${speakerBuffer.length} bytes`);
-  } catch (err) {
-    logError(`Failed to create starter WAV files for chunk ${chunkCounter}:`, err);
+  const chunkStartTime = new Date().toLocaleTimeString();
+  logVerbose(`Starting chunk ${chunkCounter} at ${chunkStartTime}, chunk size: ${RECORDING_CHUNK_DURATION_SECONDS}s`);
+  
+  // Instead of stopping and starting the recorders, we'll use the continuous recordings
+  // that are already being saved to the debug files, and transcribe those
+  if (!DEBUG_SAVE_RECORDINGS) {
+    logWarn("DEBUG_SAVE_RECORDINGS is disabled, cannot process chunks without continuous recordings");
+    return;
   }
-
-  // --- Stop current recording momentarily ---
-  if (micRecorder) micRecorder.stop();
-  if (speakerRecorder) speakerRecorder.stop();
-
-  // --- Create new file streams for the chunk ---
-  // Use 'r+' mode to update the existing files rather than overwriting them
-  micFileStream = fs.createWriteStream(micChunkFile, { flags: 'r+' });
-  speakerFileStream = fs.createWriteStream(speakerChunkFile, { flags: 'r+' });
-
-  let micPipeDone = false;
-  let speakerPipeDone = false;
-
-  const checkCompletion = () => {
-    if (micPipeDone && speakerPipeDone) {
-      logVerbose(`Chunk ${chunkCounter} files written.`);
-
-      // Give some time for file operations to complete
-      setTimeout(() => {
-        // Verify files exist and have sufficient content before transcription
-        const minValidSize = 10000; // At least 10KB to likely have enough audio data
-
-        const micExists = fs.existsSync(micChunkFile);
-        const speakerExists = fs.existsSync(speakerChunkFile);
-
-        if (micExists) {
-          const micStats = fs.statSync(micChunkFile);
-          logVerbose(`Mic file size: ${micStats.size} bytes`);
-          if (micStats.size > minValidSize) {
-            transcribeAudioChunk(micChunkFile, "You");
-          } else {
-            logWarn(`Mic chunk file too small (${micStats.size} bytes), skipping transcription`);
-          }
-        } else {
-          logWarn(`Mic chunk file does not exist, skipping transcription`);
-        }
-
-        if (speakerExists) {
-          const speakerStats = fs.statSync(speakerChunkFile);
-          logVerbose(`Speaker file size: ${speakerStats.size} bytes`);
-          if (speakerStats.size > minValidSize) {
-            transcribeAudioChunk(speakerChunkFile, "Other");
-          } else {
-            logWarn(`Speaker chunk file too small (${speakerStats.size} bytes), skipping transcription`);
-          }
-        } else {
-          logWarn(`Speaker chunk file does not exist, skipping transcription`);
-        }
-
-        // --- Restart recording for the next chunk ---
-        if (isRecording) {
-           try {
-              if (micRecorder) micRecorder.start();
-              if (speakerRecorder) speakerRecorder.start();
-              logVerbose("Recorders restarted for next chunk.");
-           } catch(err) {
-              logError("Error restarting recorders:", err);
-              stopRecording();
-           }
-        }
-      }, 500); // Wait 500ms to ensure file operations are complete
+  
+  // Find the latest continuous recordings in our debug folder
+  try {
+    // Create the debug directory if it doesn't exist
+    if (!fs.existsSync(DEBUG_RECORDINGS_DIR)) {
+      fs.mkdirSync(DEBUG_RECORDINGS_DIR, { recursive: true });
+      logVerbose(`Created debug recordings directory: ${DEBUG_RECORDINGS_DIR}`);
     }
-  };
+    
+    const micChunkFile = path.join(DEBUG_RECORDINGS_DIR, `chunk-mic-${timestamp}-${chunkCounter}.wav`);
+    const speakerChunkFile = path.join(DEBUG_RECORDINGS_DIR, `chunk-speaker-${timestamp}-${chunkCounter}.wav`);
 
-  // Helper to handle writing WAV data
-  const setupPipeAndTranscribe = (recorder, fileStream, chunkFile, type) => {
-    if (recorder && recorder.stream()) {
-      recorder.stream().pipe(fileStream)
-        .on('finish', () => {
-          logVerbose(`${type} chunk ${chunkCounter} finished writing.`);
-          if (type === 'Mic') micPipeDone = true;
-          else speakerPipeDone = true;
-          checkCompletion();
-        })
-        .on('error', (err) => {
-          logError(`Error writing ${type} chunk ${chunkCounter}:`, err);
-          if (type === 'Mic') micPipeDone = true;
-          else speakerPipeDone = true;
-          checkCompletion();
-        });
+    logVerbose(`Processing chunk ${chunkCounter} using continuous recordings...`);
+    
+    // Look for continuous recording files
+    const files = fs.readdirSync(DEBUG_RECORDINGS_DIR);
+    const micFiles = files.filter(f => f.startsWith('continuous-mic-'));
+    const speakerFiles = files.filter(f => f.startsWith('continuous-speaker-'));
+    
+    if (micFiles.length > 0 && speakerFiles.length > 0) {
+      // Sort by timestamp to get most recent
+      micFiles.sort();
+      speakerFiles.sort();
+      
+      const latestMicFile = path.join(DEBUG_RECORDINGS_DIR, micFiles[micFiles.length - 1]);
+      const latestSpeakerFile = path.join(DEBUG_RECORDINGS_DIR, speakerFiles[speakerFiles.length - 1]);
+      
+      logVerbose(`Using latest mic file: ${latestMicFile}`);
+      logVerbose(`Using latest speaker file: ${latestSpeakerFile}`);
+      
+      // Copy the files for this chunk
+      fs.copyFileSync(latestMicFile, micChunkFile);
+      fs.copyFileSync(latestSpeakerFile, speakerChunkFile);
+      
+      // Get file stats
+      const micStats = fs.statSync(micChunkFile);
+      const speakerStats = fs.statSync(speakerChunkFile);
+      
+      logVerbose(`Mic chunk file size: ${micStats.size} bytes`);
+      logVerbose(`Speaker chunk file size: ${speakerStats.size} bytes`);
+      
+      // Minimum size for a valid WAV file (at least WAV header + some content)
+      const minValidSize = 1000;
+      
+      if (micStats.size > minValidSize) {
+        transcribeAudioChunk(micChunkFile, "You");
+      } else {
+        logWarn(`Mic chunk file too small: ${micStats.size} bytes, skipping transcription`);
+      }
+      
+      if (speakerStats.size > minValidSize) {
+        transcribeAudioChunk(speakerChunkFile, "Other");
+      } else {
+        logWarn(`Speaker chunk file too small: ${speakerStats.size} bytes, skipping transcription`);
+      }
     } else {
-      logWarn(`${type} recorder or stream not available for piping chunk.`);
-      if (type === 'Mic') micPipeDone = true;
-      else speakerPipeDone = true;
-      checkCompletion();
+      logWarn("No continuous recordings found for transcription");
     }
-  };
-
-  // Setup pipes
-  setupPipeAndTranscribe(micRecorder, micFileStream, micChunkFile, 'Mic');
-  setupPipeAndTranscribe(speakerRecorder, speakerFileStream, speakerChunkFile, 'Speaker');
+  } catch (err) {
+    logError(`Error processing continuous recordings: ${err.message}`);
+  }
 }
-
 
 // --- Electron App Setup ---
 function createWindow() {

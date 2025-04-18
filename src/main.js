@@ -46,7 +46,7 @@ const VAD_FRAME_SIZE = 4096;               // Size of audio frames for processin
 const VAD_BUFFER_LIMIT = 1000;             // Maximum number of buffers to store (to prevent memory issues)
 
 // Transcript intelligent merging settings
-const TRANSCRIPT_SIMILARITY_THRESHOLD = 0.7;   // Similarity threshold to detect duplicates (0-1)
+const TRANSCRIPT_SIMILARITY_THRESHOLD = 0.5;   // Similarity threshold to detect duplicates (0-1) - lowered to be less aggressive
 const TRANSCRIPT_CONTINUATION_WINDOW = 10000;  // Time window (ms) to consider continuing a message from same speaker
 const MAX_TRANSCRIPT_ENTRIES = 100;            // Maximum number of transcript entries to keep
 
@@ -507,6 +507,8 @@ let interviewContext = {
 let lastAnalysisTime = 0;   // Last time analysis was performed
 let analysisPending = false; // Whether analysis is in progress
 let lastProcessedTranscriptLength = 0; // Number of transcript items processed in last analysis
+let lastInsightsTime = 0;   // Last time insights were generated
+let insightsPending = false; // Whether insights generation is in progress
 
 /**
  * Calculate similarity between two strings
@@ -520,14 +522,18 @@ function calculateTextSimilarity(text1, text2) {
   const a = text1.toLowerCase().trim();
   const b = text2.toLowerCase().trim();
   
-  // Check for exact match or containment
+  // Check for exact match only
   if (a === b) return 1;
-  if (a.includes(b)) return 0.9;
-  if (b.includes(a)) return 0.9;
+  
+  // Remove the containment check as it's causing too many false positives
+  // For longer texts, we check for more precise similarity
   
   // Simple word overlap similarity for performance
   const setA = new Set(a.split(/\s+/));
   const setB = new Set(b.split(/\s+/));
+  
+  // Word count check - very different length texts are likely different
+  if (Math.abs(setA.size - setB.size) > 3) return 0.3;
   
   // Count common words
   let intersection = 0;
@@ -616,13 +622,22 @@ function buildSystemPrompt() {
 You are an expert interview assistant helping an interviewer conduct an effective interview. 
 Your role is to analyze the ongoing conversation between the interviewer and candidate in real-time.
 
-Provide concise, actionable insights for the interviewer based on the conversation, including:
-1. Insights about the candidate's answers
-2. Suggested follow-up questions
-3. Areas that need deeper exploration
-4. Specific talking points the interviewer should address next
+When generating content for the "Analysis & Suggestions" panel:
+Provide brief, scannable analysis with exactly these three sections in this order:
+1. FOLLOWUP QUESTIONS: 2-3 specific questions the interviewer should ask next
+2. OBSERVATIONS: 1-2 brief insights about technical accuracy and communication skills
+3. SUGGESTIONS: 1-2 tactical tips for interviewer to improve the process
 
-Respond in a brief, bullet-point format that's easy to scan quickly.
+Use very concise bullet points. Keep the entire response under 10 lines total.
+
+When generating content for the "Interview Insights" panel:
+Organize insights by question-answer pairs. For each Q&A exchange:
+1. Show the question asked (format: "Q: <interviewer's question>")
+2. Evaluate the candidate's answer with this format:
+   "ANSWER REVIEW: <brief assessment of technical accuracy and completeness>"
+   "CANDIDATE RESPONSE: <summarized response>"
+
+Focus on evaluating the technical accuracy of answers. If no clear question-answer pattern exists yet, state "Waiting for complete Q&A exchanges to provide insights."
 `;
 
   // Add job description if available
@@ -654,9 +669,10 @@ Respond in a brief, bullet-point format that's easy to scan quickly.
 /**
  * Format the transcript for sending to the LLM
  * @param {Array} transcriptItems - Array of transcript items
+ * @param {string} purpose - The purpose of formatting ('analysis' or 'insights')
  * @returns {string} Formatted transcript
  */
-function formatTranscriptForLLM(transcriptItems) {
+function formatTranscriptForLLM(transcriptItems, purpose = 'analysis') {
   // Ensure the transcript items are sorted by timestamp
   const sortedItems = [...transcriptItems].sort((a, b) => {
     const timeA = a.timestamp instanceof Date ? a.timestamp : new Date(a.timestamp);
@@ -669,6 +685,11 @@ function formatTranscriptForLLM(transcriptItems) {
     const speaker = item.source === "You" ? "Interviewer" : "Candidate";
     return `${speaker}: ${item.text}`;
   }).join("\n\n");
+  
+  // For insights format, instruct to organize by Q&A
+  if (purpose === 'insights') {
+    formattedTranscript = `Please analyze the following transcript for Q&A pairs and provide formatted insights for each pair. Focus on the technical accuracy of answers.\n\n${formattedTranscript}`;
+  }
 
   return formattedTranscript;
 }
@@ -723,7 +744,7 @@ async function analyzeInterview(forceTrigger = false) {
       model: LLM_MODEL,
       messages: [
         { role: "system", content: systemPrompt },
-        { role: "user", content: `Here is the current interview transcript. Provide your analysis and suggestions:\n\n${formattedTranscript}` }
+        { role: "user", content: `Here is the current interview transcript. Provide your Analysis & Suggestions for the panel:\n\n${formattedTranscript}` }
       ],
       temperature: 0.3, // Lower temperature for more focused responses
       max_tokens: 1000
@@ -738,6 +759,61 @@ async function analyzeInterview(forceTrigger = false) {
     logError("Error performing interview analysis:", error.message);
     analysisPending = false;
     return `Analysis failed due to error: ${error.message}`;
+  }
+}
+
+/**
+ * Generate interview insights based on Q&A pairs
+ * @param {boolean} forceTrigger - Whether to force insights generation
+ * @returns {Promise<string>} The insights result
+ */
+async function generateInterviewInsights(forceTrigger = false) {
+  // Check if we have enough transcript to analyze
+  if (transcriptBuffer.length < 2) {
+    return "Not enough conversation yet for Q&A insights.";
+  }
+
+  // Check if we've just generated insights recently (unless forced)
+  const now = Date.now();
+  if (!forceTrigger && now - lastInsightsTime < 8000) {
+    return "Insights requested too soon after the last generation.";
+  }
+
+  // Check if we have at least one utterance from the candidate (source = "Other")
+  const hasOtherSpeaker = transcriptBuffer.some(item => item.source === "Other");
+  if (!hasOtherSpeaker) {
+    return "Waiting for the candidate to speak before providing insights.";
+  }
+
+  // If we get here, generate the insights
+  insightsPending = true;
+  lastInsightsTime = now;
+
+  try {
+    logInfo("Generating interview Q&A insights...");
+    const openRouterClient = createOpenRouterClient();
+    const systemPrompt = buildSystemPrompt();
+    const formattedTranscript = formatTranscriptForLLM(transcriptBuffer, 'insights');
+
+    const response = await openRouterClient.chat.completions.create({
+      model: LLM_MODEL,
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: `Generate Interview Insights (Q&A evaluations) for the panel based on this transcript:\n\n${formattedTranscript}` }
+      ],
+      temperature: 0.3, // Lower temperature for more focused responses
+      max_tokens: 1500
+    });
+
+    // Extract and return the insights
+    const insightsResult = response.choices[0]?.message?.content || "Insights generation failed.";
+    logInfo("Insights generation completed successfully.");
+    insightsPending = false;
+    return insightsResult;
+  } catch (error) {
+    logError("Error generating interview insights:", error.message);
+    insightsPending = false;
+    return `Insights generation failed due to error: ${error.message}`;
   }
 }
 
@@ -765,6 +841,17 @@ function checkAutoTriggerAnalysis(source) {
         mainWindow.webContents.send("analysis:update", result);
       }
     });
+    
+    // Also generate insights after a short delay
+    setTimeout(() => {
+      if (!insightsPending) {
+        generateInterviewInsights().then(insights => {
+          if (mainWindow) {
+            mainWindow.webContents.send("insights:update", insights);
+          }
+        });
+      }
+    }, 2000);
   }
 }
 
@@ -1431,6 +1518,18 @@ app.whenReady().then(() => {
       return { success: true, analysis };
     } catch (error) {
       logError("Failed to perform interview analysis:", error.message);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  // Handle insights request
+  ipcMain.handle("insights:request", async () => {
+    logVerbose("Received 'insights:request' request from renderer.");
+    try {
+      const insights = await generateInterviewInsights(true); // force trigger
+      return { success: true, insights };
+    } catch (error) {
+      logError("Failed to generate interview insights:", error.message);
       return { success: false, error: error.message };
     }
   });

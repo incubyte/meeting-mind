@@ -19,6 +19,10 @@ const contextStatusSpan = document.getElementById("contextStatus");
 const requestAnalysisBtn = document.getElementById("requestAnalysisBtn");
 const analysisOutputDiv = document.getElementById("analysisOutput");
 
+// Insights elements
+const updateInsightsBtn = document.getElementById("updateInsightsBtn");
+const insightsOutputDiv = document.getElementById("insightsOutput");
+
 let statusLog = ["App Initialized."];
 const MAX_STATUS_LINES = 20;
 
@@ -456,11 +460,47 @@ window.electronAPI.onAnalysisUpdate((analysisResult) => {
 });
 
 // --- Cleanup on unload ---
+// --- Insights ---
+updateInsightsBtn.addEventListener("click", async () => {
+  if (transcriptBuffer.length === 0) {
+    insightsOutputDiv.innerHTML = "No transcript available yet for insights.";
+    return;
+  }
+  
+  updateInsightsBtn.disabled = true;
+  insightsOutputDiv.innerHTML = "Generating insights...";
+  
+  try {
+    const result = await window.electronAPI.requestInsights();
+    if (result.success) {
+      // Format the insights result with line breaks
+      insightsOutputDiv.innerHTML = result.insights.replace(/\n/g, '<br>');
+    } else {
+      insightsOutputDiv.innerHTML = `Insights generation failed: ${result.error}`;
+    }
+  } catch (error) {
+    insightsOutputDiv.innerHTML = `Error generating insights: ${error.message}`;
+  } finally {
+    // Re-enable after a short delay to prevent spamming
+    setTimeout(() => {
+      updateInsightsBtn.disabled = false;
+    }, 2000);
+  }
+});
+
+// Add insights update listener
+window.electronAPI.onInsightsUpdate((insightsResult) => {
+  // Format the insights result with line breaks
+  const formattedInsights = insightsResult.replace(/\n/g, '<br>');
+  insightsOutputDiv.innerHTML = formattedInsights;
+});
+
 window.addEventListener('beforeunload', () => {
     window.electronAPI.removeAllListeners('transcript:update');
     window.electronAPI.removeAllListeners('status:update');
     window.electronAPI.removeAllListeners('recording:status');
     window.electronAPI.removeAllListeners('analysis:update');
+    window.electronAPI.removeAllListeners('insights:update');
 });
 
 // Initial UI state

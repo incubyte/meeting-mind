@@ -12,6 +12,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
   
   // Interview analysis
   requestAnalysis: () => ipcRenderer.invoke("analysis:request"),
+  requestInsights: () => ipcRenderer.invoke("insights:request"),
 
   // Main to Renderer (Send/On pattern for updates)
   onTranscriptUpdate: (callback) =>
@@ -22,6 +23,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.on("recording:status", (_event, value) => callback(value)),
   onAnalysisUpdate: (callback) =>
     ipcRenderer.on("analysis:update", (_event, value) => callback(value)),
+  onInsightsUpdate: (callback) =>
+    ipcRenderer.on("insights:update", (_event, value) => callback(value)),
 
   // Clean up listeners when the window is unloaded
   removeAllListeners: (channel) => ipcRenderer.removeAllListeners(channel),

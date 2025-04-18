@@ -185,14 +185,22 @@ App Initialized.</pre
           </div>
         </section>
 
-        <!-- Right Column: AI Analysis (duplicated for the bottom section) -->
+        <!-- Right Column: Interview Insights -->
         <section class="bg-white shadow rounded-lg p-3 flex flex-col h-full">
-          <h2 class="text-lg font-semibold mb-3">Interview Insights</h2>
+          <div class="flex justify-between items-center mb-3">
+            <h2 class="text-lg font-semibold">Interview Insights</h2>
+            <button
+              id="updateInsightsBtn"
+              class="bg-purple-500 hover:bg-purple-600 text-sm py-1 px-3"
+            >
+              Update Insights
+            </button>
+          </div>
           <div
+            id="insightsOutput"
             class="border rounded p-3 bg-gray-50 text-sm overflow-auto flex-grow"
           >
-            Detailed interview insights and feedback will appear here after
-            analysis...
+            Q&A evaluations will appear here as the interview progresses...
           </div>
         </section>
       </div>

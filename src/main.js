@@ -63,15 +63,16 @@ function processAudioForVAD(audioBuffer, source) {
     const thresholdInfo = `threshold=${VAD_AMPLITUDE_THRESHOLD}/${VAD_SILENCE_THRESHOLD}`;
     logVerbose(`${source} VAD: amplitude=${amplitude.toFixed(2)}, active=${state.isActive}, silence=${state.isSilence}, ${thresholdInfo}`);
     
-    // Log to UI for better visibility
-    if (state.frameCount % 20 === 0 && mainWindow) {
-      const levelStatus = amplitude > VAD_AMPLITUDE_THRESHOLD ? "SPEECH" : "quiet";
-      mainWindow.webContents.send("status:update", `[MIC] Level: ${amplitude.toFixed(0)} (${levelStatus})`);
-    }
+    // Log to UI for better visibility - send every frame for real-time meter
+    const levelStatus = amplitude > VAD_AMPLITUDE_THRESHOLD ? "SPEECH" : "quiet";
+    mainWindow.webContents.send("status:update", `[MIC] Level: ${amplitude.toFixed(0)} (${levelStatus})`);
   } 
-  // For speaker, log less frequently
-  else if (source === 'speaker' && state.frameCount % 30 === 0) {
+  // For speaker, send level data at the same rate as mic
+  else if (source === 'speaker' && state.frameCount % 5 === 0) {
     logVerbose(`${source} VAD: amplitude=${amplitude.toFixed(2)}, active=${state.isActive}, silence=${state.isSilence}`);
+    
+    // Send speaker level to UI for visualization
+    mainWindow.webContents.send("status:update", `[SPEAKER] Level: ${amplitude.toFixed(0)}`);
   }
   
   // Safety check - if our buffer gets too large, we need to finalize and send it

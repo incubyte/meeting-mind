@@ -4,28 +4,83 @@ const stopRecordingBtn = document.getElementById("stopRecordingBtn");
 const recordingStatusDiv = document.getElementById("recordingStatus");
 const statusMessagesPre = document.getElementById("statusMessages");
 const transcriptOutputDiv = document.getElementById("transcriptOutput");
+const downloadTranscriptBtn = document.getElementById("downloadTranscriptBtn");
+const micMeterBar = document.getElementById("micMeterBar");
+const speakerMeterBar = document.getElementById("speakerMeterBar");
 
 let statusLog = ["App Initialized."];
 const MAX_STATUS_LINES = 20;
+
+// Track audio levels for visualization
+let lastMicLevel = 0;
+let lastSpeakerLevel = 0;
+
+// Helper to map audio level to percentage for display
+function mapLevelToPercentage(level, max = 200) {
+  // Cap the level at max to prevent overflow
+  const cappedLevel = Math.min(level, max);
+  // Map to percentage (0-100)
+  return (cappedLevel / max) * 100;
+}
+
+// Update the audio level meters every 100ms
+setInterval(() => {
+  // Update mic level meter
+  micMeterBar.style.width = `${mapLevelToPercentage(lastMicLevel)}%`;
+  
+  // Update speaker level meter (when we have actual speaker data)
+  speakerMeterBar.style.width = `${mapLevelToPercentage(lastSpeakerLevel)}%`;
+  
+  // Add a color effect based on level
+  if (lastMicLevel > 100) {
+    micMeterBar.classList.add("bg-green-600");
+  } else {
+    micMeterBar.classList.remove("bg-green-600");
+  }
+  
+  if (lastSpeakerLevel > 100) {
+    speakerMeterBar.classList.add("bg-blue-600");
+  } else {
+    speakerMeterBar.classList.remove("bg-blue-600");
+  }
+}, 100);
 
 function addStatusMessage(message) {
   console.log("Status Update:", message); // Log to console as well
   
   // Special handling for mic level messages
   if (message.startsWith("[MIC] Level:")) {
-    // Update the recording status with level info
-    const level = parseInt(message.match(/Level: (\d+)/)[1]);
+    // Extract level and update the mic meter
+    const levelMatch = message.match(/Level: (\d+)/);
+    if (levelMatch && levelMatch[1]) {
+      const level = parseInt(levelMatch[1]);
+      lastMicLevel = level;
+    }
+    
     const status = message.includes("SPEECH") ? "SPEAKING" : "silent";
     
     // Update the recording status display
     const recordingStatusText = recordingStatusDiv.textContent.split('(')[0];
-    recordingStatusDiv.textContent = `${recordingStatusText} (Mic: ${level} - ${status})`;
+    recordingStatusDiv.textContent = `${recordingStatusText} (Mic: ${lastMicLevel} - ${status})`;
     
     // Use color to indicate speech detection
     if (status === "SPEAKING") {
       recordingStatusDiv.style.color = "#28a745"; // Green when speaking
     } else {
       recordingStatusDiv.style.color = "black"; // Default color when silent
+    }
+    
+    // Don't add these messages to the log to avoid cluttering
+    return;
+  }
+  
+  // Special handling for speaker level messages (if they exist)
+  if (message.startsWith("[SPEAKER] Level:")) {
+    // Extract level and update the speaker meter
+    const levelMatch = message.match(/Level: (\d+)/);
+    if (levelMatch && levelMatch[1]) {
+      const level = parseInt(levelMatch[1]);
+      lastSpeakerLevel = level;
     }
     
     // Don't add these messages to the log to avoid cluttering
@@ -118,6 +173,58 @@ function updateTranscript(transcriptItems) {
   messagesArea.scrollTop = messagesArea.scrollHeight;
 }
 
+// Function to download transcript as text or JSON
+function downloadTranscript(transcriptItems, format = 'text') {
+  if (!transcriptItems || transcriptItems.length === 0) {
+    addStatusMessage("No transcript available to download");
+    return;
+  }
+  
+  let content = '';
+  let filename = `meeting-transcript-${new Date().toISOString().split('T')[0]}.`;
+  let mimeType = '';
+  
+  // Sort transcript items by timestamp
+  const sortedItems = [...transcriptItems].sort((a, b) => {
+    const timeA = a.timestamp instanceof Date ? a.timestamp : new Date(a.timestamp);
+    const timeB = b.timestamp instanceof Date ? b.timestamp : new Date(b.timestamp);
+    return timeA - timeB;
+  });
+  
+  if (format === 'json') {
+    // JSON format
+    content = JSON.stringify(sortedItems, null, 2);
+    filename += 'json';
+    mimeType = 'application/json';
+  } else {
+    // Text format (default)
+    content = sortedItems.map(item => {
+      const time = new Date(item.timestamp).toLocaleTimeString();
+      return `[${time}] ${item.source}: ${item.text}`;
+    }).join('\n\n');
+    filename += 'txt';
+    mimeType = 'text/plain';
+  }
+  
+  // Create download link
+  const blob = new Blob([content], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.style.display = 'none';
+  document.body.appendChild(a);
+  a.click();
+  
+  // Clean up
+  setTimeout(() => {
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }, 100);
+  
+  addStatusMessage(`Transcript downloaded as ${filename}`);
+}
+
 // --- Button Event Listeners ---
 testAudioBtn.addEventListener("click", async () => {
   addStatusMessage("Testing audio devices...");
@@ -170,9 +277,18 @@ stopRecordingBtn.addEventListener("click", async () => {
   }
 });
 
+// Download transcript button
+downloadTranscriptBtn.addEventListener("click", () => {
+  // Get the current transcript items from the last received update
+  const transcriptItems = window.currentTranscriptItems || [];
+  downloadTranscript(transcriptItems, 'text');
+});
+
 // --- IPC Event Listeners ---
 window.electronAPI.onTranscriptUpdate((transcriptItems) => {
   console.log("Received transcript update:", transcriptItems);
+  // Store the transcript items for download function
+  window.currentTranscriptItems = transcriptItems;
   updateTranscript(transcriptItems);
 });
 

@@ -1,0 +1,29 @@
+{
+  "type": "module",
+  "name": "meeting-mind",
+  "version": "1.0.0",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "dotenv": "^16.5.0",
+    "node-audiorecorder": "^3.0.0",
+    "openai": "^4.95.1",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.4.0",
+    "concurrently": "^9.1.2",
+    "cross-env": "^7.0.3",
+    "electron": "^35.1.5",
+    "electron-builder": "^26.0.12",
+    "vite": "^6.3.2",
+    "wait-on": "^8.0.3"
+  }
+}

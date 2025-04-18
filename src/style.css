@@ -187,6 +187,12 @@ body {
     color: #777;
     text-align: right;
   }
+  
+  .message-updated {
+    font-size: 0.9em;
+    color: #999;
+    font-style: italic;
+  }
 
   .transcript-item {
     margin-bottom: 10px;

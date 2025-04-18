@@ -190,25 +190,17 @@ async function transcribeAudioChunk(filePath, source) {
     }
 
     if (transcription.text && transcription.text.trim()) {
-      // Check for common placeholder responses when there's no actual speech
       const text = transcription.text.trim();
-      const placeholders = ["you", "you.", "...", "…"];
-      
-      // Only add meaningful transcriptions
-      if (!placeholders.includes(text.toLowerCase())) {
-        logVerbose(`Adding meaningful transcription: "${text}"`);
-        transcriptBuffer.push({
-          timestamp: new Date(),
-          source: source,
-          text: text,
-        });
-        // Sort buffer chronologically
-        transcriptBuffer.sort((a, b) => a.timestamp - b.timestamp);
-        // Send updated transcript to renderer
-        mainWindow.webContents.send("transcript:update", transcriptBuffer);
-      } else {
-        logVerbose(`Ignoring placeholder transcription: "${text}"`);
-      }
+      logVerbose(`Adding transcription: "${text}"`);
+      transcriptBuffer.push({
+        timestamp: new Date(),
+        source: source,
+        text: text,
+      });
+      // Sort buffer chronologically
+      transcriptBuffer.sort((a, b) => a.timestamp - b.timestamp);
+      // Send updated transcript to renderer
+      mainWindow.webContents.send("transcript:update", transcriptBuffer);
     }
   } catch (error) {
     logError(`Whisper API Error for ${source} (${path.basename(filePath)}):`, error?.message || error);

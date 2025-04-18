@@ -20,6 +20,100 @@ const DEBUG_SAVE_RECORDINGS = true; // Save recordings for debugging
 const DEBUG_RECORDINGS_DIR = path.join(path.dirname(import.meta.dirname), "tmp");
 // --- End Configuration ---
 
+// Audio processing settings
+const SILENCE_THRESHOLD = 1000;            // Threshold of sound level to consider audio to have speech
+const SAMPLES_TO_CHECK = 100;              // Number of samples to check in the audio file
+
+// Transcript intelligent merging settings
+const TRANSCRIPT_SIMILARITY_THRESHOLD = 0.7;   // Similarity threshold to detect duplicates (0-1)
+const TRANSCRIPT_CONTINUATION_WINDOW = 10000;  // Time window (ms) to consider continuing a message from same speaker
+const MAX_TRANSCRIPT_ENTRIES = 100;            // Maximum number of transcript entries to keep
+
+/**
+ * Check if an audio file contains actual speech/sound rather than just silence
+ * @param {string} filePath - Path to the WAV audio file
+ * @returns {boolean} - True if the audio likely contains speech, false if it's likely silence
+ */
+function checkForSpeechInAudio(filePath) {
+  try {
+    // Read the WAV file
+    const fileBuffer = fs.readFileSync(filePath);
+    
+    // WAV file structure:
+    // - 44 bytes header
+    // - Then the actual PCM audio data
+    
+    // Skip the header to get to the audio data
+    const audioData = fileBuffer.slice(44);
+    
+    // For 16-bit audio (which we're using), each sample is 2 bytes
+    const bytesPerSample = 2; 
+    
+    // The number of samples in the file
+    const sampleCount = Math.floor(audioData.length / bytesPerSample);
+    
+    // Don't process if the file is too small
+    if (sampleCount < 100) {
+      logWarn(`Audio file too small for speech detection: ${filePath}`);
+      return false;
+    }
+    
+    // We'll check a subset of samples throughout the file
+    const samplesPerCheck = Math.floor(sampleCount / SAMPLES_TO_CHECK);
+    
+    // Track if we found any sound above the threshold
+    let foundSound = false;
+    let maxValue = 0;
+    
+    // Check samples throughout the file
+    for (let i = 0; i < SAMPLES_TO_CHECK; i++) {
+      // Calculate the position to check
+      const sampleIndex = i * samplesPerCheck;
+      const bufferPos = sampleIndex * bytesPerSample;
+      
+      // Skip if we're at the end of the file
+      if (bufferPos >= audioData.length - 1) continue;
+      
+      // Read a 16-bit sample (little endian)
+      const sampleValue = audioData.readInt16LE(bufferPos);
+      
+      // Take the absolute value (since audio waveforms go negative)
+      const absValue = Math.abs(sampleValue);
+      
+      // Keep track of max value for logging
+      maxValue = Math.max(maxValue, absValue);
+      
+      // Check if this sample is above our threshold
+      if (absValue > SILENCE_THRESHOLD) {
+        foundSound = true;
+        break; // We found sound, no need to check more
+      }
+    }
+    
+    logVerbose(`Audio check for ${path.basename(filePath)}: max value = ${maxValue}, threshold = ${SILENCE_THRESHOLD}, contains speech = ${foundSound}`);
+    
+    // If we're debugging, save a copy of the file with the result in the filename
+    if (DEBUG_SAVE_RECORDINGS) {
+      const debugFileCopy = path.join(
+        DEBUG_RECORDINGS_DIR,
+        `${foundSound ? 'HAS-SPEECH' : 'SILENCE'}-${path.basename(filePath)}`
+      );
+      try {
+        fs.copyFileSync(filePath, debugFileCopy);
+        logVerbose(`Saved silence-checked audio file to: ${debugFileCopy}`);
+      } catch (err) {
+        logWarn(`Failed to save silence-checked audio copy: ${err.message}`);
+      }
+    }
+    
+    return foundSound;
+  } catch (err) {
+    // If anything goes wrong, log the error and assume there's no speech (safer approach)
+    logError(`Error checking for speech in audio file ${filePath}: ${err.message}`);
+    return false;
+  }
+}
+
 let mainWindow;
 let micRecorder = null;
 let speakerRecorder = null;
@@ -28,8 +122,87 @@ let speakerFileStream = null;
 let speakerLoopbackDevice = null;
 let isRecording = false;
 let recordingInterval = null;
-let transcriptBuffer = []; // { timestamp: Date, source: string, text: string }[]
+// Enhanced transcript buffer with additional properties for smart merging
+let transcriptBuffer = []; // { id: number, timestamp: Date, lastUpdated: Date, source: string, text: string }[]
 let chunkCounter = 0;
+
+/**
+ * Calculate similarity between two strings
+ * Returns a value between 0 (completely different) and 1 (identical)
+ */
+function calculateTextSimilarity(text1, text2) {
+  // If either string is empty, they're completely different
+  if (!text1 || !text2) return 0;
+  
+  // Normalize both texts - lowercase and trim
+  const a = text1.toLowerCase().trim();
+  const b = text2.toLowerCase().trim();
+  
+  // Check for exact match or containment
+  if (a === b) return 1;
+  if (a.includes(b)) return 0.9;
+  if (b.includes(a)) return 0.9;
+  
+  // Simple word overlap similarity for performance
+  const setA = new Set(a.split(/\s+/));
+  const setB = new Set(b.split(/\s+/));
+  
+  // Count common words
+  let intersection = 0;
+  for (const word of setA) {
+    if (setB.has(word)) intersection++;
+  }
+  
+  // Calculate Jaccard similarity
+  const union = setA.size + setB.size - intersection;
+  return union === 0 ? 0 : intersection / union;
+}
+
+/**
+ * Find the most recent transcript from a specific source
+ */
+function findLatestTranscriptFromSource(source) {
+  for (let i = transcriptBuffer.length - 1; i >= 0; i--) {
+    if (transcriptBuffer[i].source === source) {
+      return transcriptBuffer[i];
+    }
+  }
+  return null;
+}
+
+/**
+ * Check if a transcript should be ignored (too similar to existing text)
+ * or merged with an existing message
+ * 
+ * @returns {object} Decision with action type and message
+ */
+function processTranscript(newText, source) {
+  // Find the latest message from this source
+  const latestMessage = findLatestTranscriptFromSource(source);
+  
+  if (!latestMessage) {
+    return { action: 'create', message: 'First message from this source' };
+  }
+  
+  // Check if this is similar to the previous message from this source
+  const similarity = calculateTextSimilarity(latestMessage.text, newText);
+  
+  // If too similar, ignore to avoid duplicates
+  if (similarity > TRANSCRIPT_SIMILARITY_THRESHOLD) {
+    return { action: 'ignore', message: `Duplicate detected (${similarity.toFixed(2)})` };
+  }
+  
+  // Check if we should continue the previous message (same speaker within time window)
+  const now = new Date();
+  const timeSinceLastUpdate = now - new Date(latestMessage.lastUpdated);
+  
+  if (timeSinceLastUpdate <= TRANSCRIPT_CONTINUATION_WINDOW) {
+    return { action: 'append', message: `Continuing message (${timeSinceLastUpdate}ms gap)` };
+  }
+  
+  // Default to creating a new message
+  return { action: 'create', message: 'New message' };
+}
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -191,14 +364,58 @@ async function transcribeAudioChunk(filePath, source) {
 
     if (transcription.text && transcription.text.trim()) {
       const text = transcription.text.trim();
-      logVerbose(`Adding transcription: "${text}"`);
-      transcriptBuffer.push({
-        timestamp: new Date(),
-        source: source,
-        text: text,
-      });
-      // Sort buffer chronologically
-      transcriptBuffer.sort((a, b) => a.timestamp - b.timestamp);
+      
+      // Process the transcript to determine if we should add, append, or ignore
+      const decision = processTranscript(text, source);
+      logVerbose(`Transcript decision for "${text}": ${decision.action} - ${decision.message}`);
+      
+      const now = new Date();
+      
+      if (decision.action === 'ignore') {
+        // Skip this transcription as it's likely a duplicate
+        logVerbose(`Ignoring duplicate transcription: "${text}"`);
+      }
+      else if (decision.action === 'append') {
+        // Append to the existing message from this source
+        const latestMessage = findLatestTranscriptFromSource(source);
+        
+        // Only append if the new text adds information
+        if (text.length > latestMessage.text.length || !latestMessage.text.includes(text)) {
+          logVerbose(`Appending to existing ${source} message: "${latestMessage.text}" + "${text}"`);
+          
+          // Decide how to join the texts (with space or newline)
+          const lastChar = latestMessage.text.slice(-1);
+          const joinChar = (lastChar === '.' || lastChar === '?' || lastChar === '!') ? ' ' : ' ';
+          
+          // Update the message
+          latestMessage.text = latestMessage.text + joinChar + text;
+          latestMessage.lastUpdated = now;
+          
+          // Note: No need to sort since we're updating in place
+        } else {
+          logVerbose(`New text "${text}" doesn't add information to "${latestMessage.text}"`);
+        }
+      }
+      else {
+        // Create a new transcript entry
+        logVerbose(`Adding new transcription: "${text}"`);
+        transcriptBuffer.push({
+          id: Date.now(), // Unique ID
+          timestamp: now,
+          lastUpdated: now,
+          source: source,
+          text: text,
+        });
+        
+        // Sort buffer chronologically
+        transcriptBuffer.sort((a, b) => a.timestamp - b.timestamp);
+        
+        // Limit transcript buffer size
+        if (transcriptBuffer.length > MAX_TRANSCRIPT_ENTRIES) {
+          transcriptBuffer.shift(); // Remove oldest entry
+        }
+      }
+      
       // Send updated transcript to renderer
       mainWindow.webContents.send("transcript:update", transcriptBuffer);
     }
@@ -501,14 +718,30 @@ function processAudioChunk() {
       // Minimum size for a valid WAV file (at least WAV header + some content)
       const minValidSize = 1000;
       
+      // Check for silence in microphone audio before transcribing
       if (micStats.size > minValidSize) {
-        transcribeAudioChunk(micChunkFile, "You");
+        // Check if the audio contains actual sound or just silence
+        const hasSpeech = checkForSpeechInAudio(micChunkFile);
+        if (hasSpeech) {
+          logVerbose(`Mic audio contains speech, sending for transcription`);
+          transcribeAudioChunk(micChunkFile, "You");
+        } else {
+          logInfo(`Mic audio appears to be silence, skipping OpenAI API call`);
+        }
       } else {
         logWarn(`Mic chunk file too small: ${micStats.size} bytes, skipping transcription`);
       }
       
+      // Check for silence in speaker audio before transcribing
       if (speakerStats.size > minValidSize) {
-        transcribeAudioChunk(speakerChunkFile, "Other");
+        // Check if the audio contains actual sound or just silence
+        const hasSpeech = checkForSpeechInAudio(speakerChunkFile);
+        if (hasSpeech) {
+          logVerbose(`Speaker audio contains speech, sending for transcription`);
+          transcribeAudioChunk(speakerChunkFile, "Other");
+        } else {
+          logInfo(`Speaker audio appears to be silence, skipping OpenAI API call`);
+        }
       } else {
         logWarn(`Speaker chunk file too small: ${speakerStats.size} bytes, skipping transcription`);
       }

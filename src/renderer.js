@@ -50,6 +50,11 @@ function updateTranscript(transcriptItems) {
     const messageDiv = document.createElement("div");
     messageDiv.classList.add("chat-message", item.source === "You" ? "message-you" : "message-other");
     
+    // Add data attributes for tracking
+    if (item.id) {
+      messageDiv.dataset.messageId = item.id;
+    }
+    
     const bubbleDiv = document.createElement("div");
     bubbleDiv.classList.add("message-bubble");
     
@@ -61,10 +66,20 @@ function updateTranscript(transcriptItems) {
     textDiv.classList.add("message-text");
     textDiv.textContent = item.text;
     
+    // Time display - show either timestamp or last updated based on what's available
     const timeSpan = document.createElement("div");
     timeSpan.classList.add("message-time");
     const messageTime = item.timestamp instanceof Date ? item.timestamp : new Date(item.timestamp);
-    timeSpan.textContent = messageTime.toLocaleTimeString();
+    
+    // If message has been updated, show that information
+    if (item.lastUpdated && item.lastUpdated !== item.timestamp) {
+      const lastUpdateTime = item.lastUpdated instanceof Date ? item.lastUpdated : new Date(item.lastUpdated);
+      // Show both times if message was updated
+      timeSpan.innerHTML = `${messageTime.toLocaleTimeString()} <span class="message-updated">(updated ${lastUpdateTime.toLocaleTimeString()})</span>`;
+    } else {
+      // Just show the creation time
+      timeSpan.textContent = messageTime.toLocaleTimeString();
+    }
     
     bubbleDiv.appendChild(nameSpan);
     bubbleDiv.appendChild(textDiv);

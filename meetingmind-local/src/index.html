@@ -1,0 +1,495 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MeetingMind Local</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+      margin: 0;
+      padding: 20px;
+      background-color: #f5f5f5;
+      color: #333;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+    
+    .header {
+      text-align: center;
+      padding-bottom: 20px;
+      border-bottom: 1px solid #ddd;
+    }
+    
+    .controls {
+      display: flex;
+      justify-content: center;
+      gap: 10px;
+      margin: 20px 0;
+    }
+    
+    button {
+      padding: 10px 20px;
+      border: none;
+      border-radius: 4px;
+      font-size: 16px;
+      cursor: pointer;
+      transition: background-color 0.3s;
+    }
+    
+    button.start {
+      background-color: #4caf50;
+      color: white;
+    }
+    
+    button.stop {
+      background-color: #f44336;
+      color: white;
+    }
+    
+    button:disabled {
+      background-color: #cccccc;
+      cursor: not-allowed;
+    }
+    
+    .status {
+      text-align: center;
+      margin: 10px 0;
+      font-weight: bold;
+    }
+    
+    .suggestions-container {
+      flex: 1;
+      background-color: white;
+      border-radius: 8px;
+      box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+      padding: 20px;
+      overflow-y: auto;
+      margin-top: 20px;
+    }
+    
+    .suggestion {
+      padding: 15px;
+      margin-bottom: 15px;
+      border-left: 4px solid #2196F3;
+      background-color: #E3F2FD;
+      border-radius: 4px;
+    }
+    
+    .suggestion-text {
+      font-size: 16px;
+      line-height: 1.5;
+    }
+    
+    .suggestion-meta {
+      font-size: 12px;
+      color: #666;
+      margin-top: 5px;
+    }
+    
+    .empty-state {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100%;
+      color: #999;
+    }
+    
+    .empty-state img {
+      width: 100px;
+      height: 100px;
+      margin-bottom: 20px;
+      opacity: 0.5;
+    }
+
+    /* Audio Visualizer Styles */
+    .audio-visualizer {
+      display: flex;
+      gap: 20px;
+      margin: 20px 0;
+      padding: 15px;
+      background-color: white;
+      border-radius: 8px;
+      box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+    }
+
+    .visualizer-container {
+      flex: 1;
+      padding: 10px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+    }
+
+    .visualizer-label {
+      font-size: 14px;
+      color: #666;
+      margin-bottom: 5px;
+    }
+
+    canvas {
+      width: 100%;
+      height: 100px;
+      background-color: #f8f8f8;
+      border-radius: 4px;
+    }
+
+    /* Test Recorder Styles */
+    .test-recorder {
+      margin: 20px 0;
+      padding: 15px;
+      background-color: white;
+      border-radius: 8px;
+      box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+    }
+
+    .test-recorder h3 {
+      margin-top: 0;
+      color: #333;
+    }
+
+    .test-controls {
+      display: flex;
+      gap: 10px;
+      margin: 10px 0;
+    }
+
+    .test-controls button {
+      flex: 1;
+    }
+
+    /* Live Transcription Styles */
+    .live-transcription {
+      margin: 20px 0;
+      padding: 15px;
+      background-color: white;
+      border-radius: 8px;
+      box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+    }
+
+    .transcription-text {
+      font-size: 16px;
+      line-height: 1.5;
+      color: #333;
+      margin: 10px 0;
+      min-height: 50px;
+      padding: 10px;
+      background-color: #f8f8f8;
+      border-radius: 4px;
+    }
+
+    .transcription-source {
+      font-size: 12px;
+      color: #666;
+    }
+
+    /* Log Viewer Styles */
+    .log-viewer {
+      margin: 20px 0;
+      padding: 15px;
+      background-color: white;
+      border-radius: 8px;
+      box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+    }
+
+    .log-container {
+      height: 200px;
+      overflow-y: auto;
+      background-color: #1e1e1e;
+      color: #d4d4d4;
+      font-family: monospace;
+      padding: 10px;
+      border-radius: 4px;
+      margin-top: 10px;
+    }
+
+    .log-entry {
+      margin: 5px 0;
+      font-size: 12px;
+    }
+
+    .log-entry.info { color: #569cd6; }
+    .log-entry.error { color: #f44336; }
+    .log-entry.warn { color: #ffa726; }
+    .log-entry.success { color: #4caf50; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>MeetingMind Local</h1>
+    <p>Real-time communication coach for your meetings</p>
+  </div>
+  
+  <div class="controls">
+    <button id="startBtn" class="start">Start Listening</button>
+    <button id="stopBtn" class="stop" disabled>Stop Listening</button>
+  </div>
+  
+  <div id="status" class="status">Ready</div>
+  
+  <!-- Audio Visualizer -->
+  <div class="audio-visualizer">
+    <div class="visualizer-container">
+      <div class="visualizer-label">Microphone Input</div>
+      <canvas id="micVisualizer"></canvas>
+    </div>
+    <div class="visualizer-container">
+      <div class="visualizer-label">System Audio</div>
+      <canvas id="systemVisualizer"></canvas>
+    </div>
+  </div>
+
+  <!-- Test Recorder -->
+  <div class="test-recorder">
+    <h3>Audio Test</h3>
+    <div class="test-controls">
+      <button id="testRecordBtn" class="start">Record Test</button>
+      <button id="testPlayBtn" class="start" disabled>Play Recording</button>
+      <button id="testStopBtn" class="stop" disabled>Stop</button>
+    </div>
+    <div id="testStatus" class="status">Ready to test</div>
+  </div>
+
+  <!-- Live Transcription -->
+  <div class="live-transcription">
+    <h3>Live Transcription</h3>
+    <div class="transcription-text" id="liveTranscription">Waiting for audio...</div>
+    <div class="transcription-source" id="transcriptionSource"></div>
+  </div>
+
+  <!-- Log Viewer -->
+  <div class="log-viewer">
+    <h3>Application Logs</h3>
+    <div class="log-container" id="logContainer"></div>
+  </div>
+  
+  <div class="suggestions-container" id="suggestions">
+    <div class="empty-state" id="emptyState">
+      <svg width="100" height="100" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M12 15C13.6569 15 15 13.6569 15 12C15 10.3431 13.6569 9 12 9C10.3431 9 9 10.3431 9 12C9 13.6569 10.3431 15 12 15Z" stroke="#999" stroke-width="2"/>
+        <path d="M18.8212 11.1788C18.9303 11.4521 19 11.7511 19 12.061C19 12.3709 18.9303 12.6699 18.8212 12.9432C18.5847 13.5509 18.1214 14.0696 17.5307 14.3834C16.9401 14.6972 16.2647 14.7817 15.6174 14.6222C14.9701 14.4626 14.3969 14.0701 14.0103 13.5149C13.6236 12.9597 13.4531 12.2751 13.5283 11.5951C13.6035 10.9152 13.9195 10.2881 14.4182 9.83968C14.917 9.39126 15.5693 9.15729 16.239 9.18419C16.9088 9.21109 17.5401 9.49702 18.0002 9.99992" stroke="#999" stroke-width="2" stroke-linecap="round"/>
+        <path d="M5.17883 11.1788C5.06968 11.4521 5 11.7511 5 12.061C5 12.3709 5.06968 12.6699 5.17883 12.9432C5.41526 13.5509 5.87857 14.0696 6.46924 14.3834C7.0599 14.6972 7.73532 14.7817 8.38264 14.6222C9.02996 14.4626 9.60311 14.0701 9.98976 13.5149C10.3764 12.9597 10.5469 12.2751 10.4717 11.5951C10.3965 10.9152 10.0805 10.2881 9.58176 9.83968C9.08302 9.39126 8.43066 9.15729 7.76091 9.18419C7.09117 9.21109 6.45986 9.49702 5.99976 9.99992" stroke="#999" stroke-width="2" stroke-linecap="round"/>
+        <path d="M7 19L12 21L17 19" stroke="#999" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M12 15V21" stroke="#999" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      <p>Start listening to receive suggestions</p>
+    </div>
+  </div>
+
+  <script>
+    // Get DOM elements
+    const startBtn = document.getElementById('startBtn');
+    const stopBtn = document.getElementById('stopBtn');
+    const statusEl = document.getElementById('status');
+    const suggestionsEl = document.getElementById('suggestions');
+    const emptyStateEl = document.getElementById('emptyState');
+    
+    // Audio visualization elements
+    const micVisualizer = document.getElementById('micVisualizer');
+    const systemVisualizer = document.getElementById('systemVisualizer');
+    const micCtx = micVisualizer.getContext('2d');
+    const systemCtx = systemVisualizer.getContext('2d');
+    
+    // Test recorder elements
+    const testRecordBtn = document.getElementById('testRecordBtn');
+    const testPlayBtn = document.getElementById('testPlayBtn');
+    const testStopBtn = document.getElementById('testStopBtn');
+    const testStatusEl = document.getElementById('testStatus');
+    
+    // Live transcription elements
+    const liveTranscriptionEl = document.getElementById('liveTranscription');
+    const transcriptionSourceEl = document.getElementById('transcriptionSource');
+    
+    // Log viewer elements
+    const logContainer = document.getElementById('logContainer');
+    
+    // Track recording state
+    let isRecording = false;
+    let suggestions = [];
+    let testRecording = null;
+    
+    // Initialize audio visualizers
+    function initVisualizers() {
+      // Set canvas sizes
+      micVisualizer.width = micVisualizer.offsetWidth;
+      micVisualizer.height = micVisualizer.offsetHeight;
+      systemVisualizer.width = systemVisualizer.offsetWidth;
+      systemVisualizer.height = systemVisualizer.offsetHeight;
+      
+      // Initialize contexts
+      micCtx.fillStyle = '#4caf50';
+      systemCtx.fillStyle = '#2196F3';
+    }
+    
+    // Update audio visualizer
+    function updateVisualizer(ctx, data, color) {
+      const width = ctx.canvas.width;
+      const height = ctx.canvas.height;
+      
+      ctx.clearRect(0, 0, width, height);
+      
+      // Calculate bar width based on data length
+      const barWidth = width / data.length;
+      
+      // Draw bars
+      data.forEach((value, index) => {
+        const barHeight = (value / 255) * height;
+        ctx.fillStyle = color;
+        ctx.fillRect(index * barWidth, height - barHeight, barWidth - 1, barHeight);
+      });
+    }
+    
+    // Add log entry
+    function addLogEntry(message, type = 'info') {
+      const entry = document.createElement('div');
+      entry.className = `log-entry ${type}`;
+      entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+      logContainer.appendChild(entry);
+      logContainer.scrollTop = logContainer.scrollHeight;
+    }
+    
+    // Add event listeners
+    startBtn.addEventListener('click', startRecording);
+    stopBtn.addEventListener('click', stopRecording);
+    testRecordBtn.addEventListener('click', startTestRecording);
+    testPlayBtn.addEventListener('click', playTestRecording);
+    testStopBtn.addEventListener('click', stopTestRecording);
+    
+    // Initialize visualizers
+    initVisualizers();
+    
+    // Set up audio data listeners
+    window.api.onAudioData((data) => {
+      if (data.source === 'microphone') {
+        updateVisualizer(micCtx, data.audioData, '#4caf50');
+      } else {
+        updateVisualizer(systemCtx, data.audioData, '#2196F3');
+      }
+    });
+    
+    // Set up transcription listener
+    window.api.onTranscription((transcription) => {
+      liveTranscriptionEl.textContent = transcription.text;
+      transcriptionSourceEl.textContent = `Source: ${transcription.source}`;
+      addLogEntry(`Transcription (${transcription.source}): ${transcription.text}`, 'info');
+    });
+    
+    // Set up suggestion listener
+    window.api.onNewSuggestion((suggestion) => {
+      addSuggestion(suggestion);
+      addLogEntry(`New suggestion: ${suggestion.suggestion}`, 'success');
+    });
+    
+    function startRecording() {
+      // Update UI
+      startBtn.disabled = true;
+      stopBtn.disabled = false;
+      statusEl.textContent = 'Listening...';
+      statusEl.style.color = '#4caf50';
+      isRecording = true;
+      
+      // Start recording via main process
+      window.api.startRecording();
+      addLogEntry('Started recording', 'success');
+    }
+    
+    function stopRecording() {
+      // Update UI
+      startBtn.disabled = false;
+      stopBtn.disabled = true;
+      statusEl.textContent = 'Stopped';
+      statusEl.style.color = '#f44336';
+      isRecording = false;
+      
+      // Stop recording via main process
+      window.api.stopRecording();
+      addLogEntry('Stopped recording', 'info');
+    }
+    
+    function startTestRecording() {
+      testRecordBtn.disabled = true;
+      testPlayBtn.disabled = true;
+      testStopBtn.disabled = false;
+      testStatusEl.textContent = 'Recording test audio...';
+      testStatusEl.style.color = '#4caf50';
+      
+      window.api.startTestRecording();
+      addLogEntry('Started test recording', 'info');
+    }
+    
+    function playTestRecording() {
+      testRecordBtn.disabled = false;
+      testPlayBtn.disabled = true;
+      testStopBtn.disabled = false;
+      testStatusEl.textContent = 'Playing test recording...';
+      testStatusEl.style.color = '#2196F3';
+      
+      window.api.playTestRecording();
+      addLogEntry('Playing test recording', 'info');
+    }
+    
+    function stopTestRecording() {
+      testRecordBtn.disabled = false;
+      testPlayBtn.disabled = false;
+      testStopBtn.disabled = true;
+      testStatusEl.textContent = 'Test stopped';
+      testStatusEl.style.color = '#f44336';
+      
+      window.api.stopTestRecording();
+      addLogEntry('Stopped test recording', 'info');
+    }
+    
+    function addSuggestion(suggestion) {
+      // Hide empty state if visible
+      if (emptyStateEl.style.display !== 'none') {
+        emptyStateEl.style.display = 'none';
+      }
+      
+      // Create suggestion element
+      const suggestionEl = document.createElement('div');
+      suggestionEl.className = 'suggestion';
+      
+      // Add suggestion text
+      const textEl = document.createElement('div');
+      textEl.className = 'suggestion-text';
+      textEl.textContent = suggestion.suggestion;
+      suggestionEl.appendChild(textEl);
+      
+      // Add metadata
+      const metaEl = document.createElement('div');
+      metaEl.className = 'suggestion-meta';
+      
+      // Format timestamp
+      const timestamp = new Date(suggestion.timestamp);
+      const timeStr = timestamp.toLocaleTimeString();
+      
+      // Create source label
+      const sourceLabel = suggestion.source === 'microphone' ? 'Based on what you said' : 'Based on what others said';
+      
+      metaEl.textContent = `${sourceLabel} • ${timeStr}`;
+      suggestionEl.appendChild(metaEl);
+      
+      // Add to container
+      suggestionsEl.insertBefore(suggestionEl, suggestionsEl.firstChild);
+      
+      // Add to suggestions array
+      suggestions.push(suggestion);
+      
+      // Limit to 50 suggestions
+      if (suggestions.length > 50) {
+        suggestions.shift();
+        // Remove oldest suggestion element
+        if (suggestionsEl.children.length > 50) {
+          suggestionsEl.removeChild(suggestionsEl.lastChild);
+        }
+      }
+    }
+    
+    // Clean up event listeners when window is closed
+    window.addEventListener('beforeunload', () => {
+      window.api.removeAllListeners();
+    });
+  </script>
+</body>
+</html>

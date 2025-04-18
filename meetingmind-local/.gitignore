@@ -1,0 +1,6 @@
+# Temporary files
+.env
+.env.example
+tmp/
+node_modules/
+*.log

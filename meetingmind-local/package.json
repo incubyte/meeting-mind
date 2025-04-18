@@ -1,0 +1,26 @@
+{
+  "name": "meetingmind-local",
+  "version": "0.1.0",
+  "description": "Real-time local audio assistant that provides feedback during meetings",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --debug",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "audio",
+    "assistant",
+    "meeting",
+    "speech-to-text",
+    "real-time"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "dotenv": "^16.3.1",
+    "electron": "^29.1.0",
+    "node-audiorecorder": "^3.0.0",
+    "openai": "^4.28.0"
+  }
+}

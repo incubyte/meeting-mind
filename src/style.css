@@ -4,7 +4,7 @@
 
 /* Custom styles that build on top of Tailwind */
 body {
-  @apply font-sans bg-gray-100 text-gray-800 p-5 flex flex-col h-screen box-border m-0;
+  @apply font-sans bg-gray-100 text-gray-800 flex flex-col min-h-screen box-border m-0;
 }
 
 h1, h2 {
@@ -12,7 +12,7 @@ h1, h2 {
 }
 
 .controls {
-  @apply mb-5 flex gap-3 items-center;
+  @apply mb-5 flex flex-wrap gap-3 items-center;
 }
 
 button {
@@ -53,7 +53,7 @@ button:disabled {
 }
 
 .status {
-  @apply bg-white shadow rounded-lg p-4 mb-5 h-60 flex flex-col;
+  @apply bg-white shadow rounded-lg p-4 mb-4 flex flex-col;
 }
 
 #recordingStatus {
@@ -61,7 +61,7 @@ button:disabled {
 }
 
 #statusMessages {
-  @apply font-mono whitespace-pre-wrap break-words bg-gray-50 border border-gray-200 p-3 flex-grow overflow-y-auto text-sm text-gray-600 min-h-[200px] max-h-[200px];
+  @apply font-mono whitespace-pre-wrap break-words bg-gray-50 border border-gray-200 p-3 flex-grow overflow-y-auto text-sm text-gray-600 min-h-[150px];
 }
 
 .transcript {
@@ -73,7 +73,7 @@ button:disabled {
 }
 
 #transcriptOutput {
-  @apply border border-gray-200 p-3 h-full overflow-y-auto flex-grow;
+  @apply border border-gray-200 p-3 overflow-y-auto flex-grow min-h-[250px];
 }
 
 /* Chat UI Styles */
@@ -94,7 +94,7 @@ button:disabled {
 }
 
 .chat-participant.other {
-  @apply text-red-600;
+  @apply text-blue-600;
 }
 
 .chat-messages {
@@ -134,7 +134,7 @@ button:disabled {
 }
 
 .message-other .message-name {
-  @apply text-red-600;
+  @apply text-blue-600;
 }
 
 .message-text {
@@ -147,4 +147,26 @@ button:disabled {
 
 .message-updated {
   @apply text-xs text-gray-400 italic;
+}
+
+/* Analysis section styles */
+#analysisOutput {
+  @apply text-gray-700 whitespace-pre-line;
+}
+
+#analysisOutput ul, 
+#analysisOutput ol {
+  @apply pl-5 my-2;
+}
+
+#analysisOutput ul li {
+  @apply list-disc ml-2 mb-1;
+}
+
+#analysisOutput ol li {
+  @apply list-decimal ml-2 mb-1;
+}
+
+#analysisOutput p {
+  @apply mb-2;
 }

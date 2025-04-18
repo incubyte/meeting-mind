@@ -113,6 +113,12 @@ function addStatusMessage(message) {
 function updateTranscript(transcriptItems) {
   transcriptOutputDiv.innerHTML = ""; // Clear current transcript
   
+  // If no transcript items, show a placeholder
+  if (!transcriptItems || transcriptItems.length === 0) {
+    transcriptOutputDiv.innerHTML = '<div class="p-4 text-gray-500 text-center">Transcript will appear here once the interview begins...</div>';
+    return;
+  }
+  
   // Create a chat-style container
   const chatContainer = document.createElement("div");
   chatContainer.classList.add("chat-container");
@@ -120,7 +126,7 @@ function updateTranscript(transcriptItems) {
   // Create a header to show we're in a chat view
   const chatHeader = document.createElement("div");
   chatHeader.classList.add("chat-header");
-  chatHeader.innerHTML = "<span class='chat-participant you'>You</span> and <span class='chat-participant other'>Other Person</span>";
+  chatHeader.innerHTML = "<span class='chat-participant you'>You</span> and <span class='chat-participant other'>Candidate</span>";
   chatContainer.appendChild(chatHeader);
   
   // Create the messages area
@@ -149,7 +155,7 @@ function updateTranscript(transcriptItems) {
     
     const nameSpan = document.createElement("div");
     nameSpan.classList.add("message-name");
-    nameSpan.textContent = item.source;
+    nameSpan.textContent = item.source === "You" ? "You (Interviewer)" : "Candidate";
     
     const textDiv = document.createElement("div");
     textDiv.classList.add("message-text");

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain } from "electron";
+import { app, BrowserWindow, ipcMain, dialog } from "electron";
 import * as path from "node:path";
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -11,6 +11,17 @@ import dotenv from "dotenv";
 dotenv.config(); // Load .env file
 
 const execPromise = promisify(exec);
+
+// --- Configuration ---
+// OpenRouter API configuration
+const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY || process.env.OPENAI_API_KEY; // Fallback to OpenAI key if not defined
+const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
+const LLM_MODEL = "anthropic/claude-3-opus-20240229"; // Fast and powerful model - can be changed
+
+// Interview assistant configuration
+const ANALYSIS_MODE = true; // Whether to enable interview analysis
+const ANALYSIS_AUTO_TRIGGER = true; // Auto trigger analysis when candidate stops speaking
+const ANALYSIS_MIN_TRANSCRIPT_LENGTH = 50; // Min characters before allowing analysis
 
 // --- Configuration ---
 const RECORDING_CHUNK_DURATION_SECONDS = 7; // Chunk duration in seconds
@@ -201,6 +212,14 @@ function finalizeUtterance(source, reason) {
       // Send to transcription API - using source mapping (mic → "You", speaker → "Other")
       const transcriptSource = source === 'mic' ? 'You' : 'Other';
       transcribeAudioChunk(state.audioPath, transcriptSource);
+      
+      // If this is a candidate utterance (speaker), check if we should auto-trigger analysis
+      if (source === 'speaker') {
+        // We'll do this after a short delay to allow transcription to complete
+        setTimeout(() => {
+          checkAutoTriggerAnalysis(source);
+        }, 2000);
+      }
     } else {
       logError(`${source} VAD: Utterance file not found: ${state.audioPath}`);
     }
@@ -476,6 +495,19 @@ let vadState = {
 let transcriptBuffer = []; // { id: number, timestamp: Date, lastUpdated: Date, source: string, text: string }[]
 let chunkCounter = 0;
 
+// Interview assistant context
+let interviewContext = {
+  jobDescription: "",       // Job description or agenda
+  candidateInfo: "",        // Information about the candidate
+  additionalContext: "",    // Any additional context provided
+  systemPrompt: "",         // Base system prompt for LLM
+};
+
+// LLM analysis state
+let lastAnalysisTime = 0;   // Last time analysis was performed
+let analysisPending = false; // Whether analysis is in progress
+let lastProcessedTranscriptLength = 0; // Number of transcript items processed in last analysis
+
 /**
  * Calculate similarity between two strings
  * Returns a value between 0 (completely different) and 1 (identical)
@@ -557,6 +589,213 @@ function processTranscript(newText, source) {
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
+
+/**
+ * Create an OpenAI compatible client for OpenRouter
+ * @returns {OpenAI} OpenAI compatible client for OpenRouter
+ */
+function createOpenRouterClient() {
+  return new OpenAI({
+    apiKey: OPENROUTER_API_KEY,
+    baseURL: OPENROUTER_BASE_URL,
+    defaultHeaders: {
+      "HTTP-Referer": "https://meeting-mind.app", // Replace with your app's URL
+      "X-Title": "Meeting Mind", // Replace with your app name
+    },
+  });
+}
+
+/**
+ * Setup the LLM system prompt for interview assistance
+ * Builds a system prompt with provided context
+ * @returns {string} System prompt for the LLM
+ */
+function buildSystemPrompt() {
+  // Start with base system instructions
+  let systemPrompt = `
+You are an expert interview assistant helping an interviewer conduct an effective interview. 
+Your role is to analyze the ongoing conversation between the interviewer and candidate in real-time.
+
+Provide concise, actionable insights for the interviewer based on the conversation, including:
+1. Insights about the candidate's answers
+2. Suggested follow-up questions
+3. Areas that need deeper exploration
+4. Specific talking points the interviewer should address next
+
+Respond in a brief, bullet-point format that's easy to scan quickly.
+`;
+
+  // Add job description if available
+  if (interviewContext.jobDescription) {
+    systemPrompt += `\n\nJOB DESCRIPTION:\n${interviewContext.jobDescription}\n`;
+  }
+
+  // Add candidate information if available
+  if (interviewContext.candidateInfo) {
+    systemPrompt += `\n\nCANDIDATE INFORMATION:\n${interviewContext.candidateInfo}\n`;
+  }
+
+  // Add any additional context provided
+  if (interviewContext.additionalContext) {
+    systemPrompt += `\n\nADDITIONAL CONTEXT:\n${interviewContext.additionalContext}\n`;
+  }
+
+  // Add interview best practices
+  systemPrompt += `\n\nKEY REMINDERS FOR GOOD INTERVIEWING:
+- Remain objective and avoid biases
+- Focus on relevant skills and experience
+- Listen actively and ask clarifying questions
+- Give the candidate enough time to respond fully
+- Stay within legal and ethical guidelines`;
+
+  return systemPrompt;
+}
+
+/**
+ * Format the transcript for sending to the LLM
+ * @param {Array} transcriptItems - Array of transcript items
+ * @returns {string} Formatted transcript
+ */
+function formatTranscriptForLLM(transcriptItems) {
+  // Ensure the transcript items are sorted by timestamp
+  const sortedItems = [...transcriptItems].sort((a, b) => {
+    const timeA = a.timestamp instanceof Date ? a.timestamp : new Date(a.timestamp);
+    const timeB = b.timestamp instanceof Date ? b.timestamp : new Date(b.timestamp);
+    return timeA - timeB;
+  });
+
+  // Format the transcript as a conversation
+  let formattedTranscript = sortedItems.map(item => {
+    const speaker = item.source === "You" ? "Interviewer" : "Candidate";
+    return `${speaker}: ${item.text}`;
+  }).join("\n\n");
+
+  return formattedTranscript;
+}
+
+/**
+ * Perform analysis on the current transcript
+ * @param {boolean} forceTrigger - Whether to force the analysis even if the conditions aren't met
+ * @returns {Promise<string>} The analysis result
+ */
+async function analyzeInterview(forceTrigger = false) {
+  // Check if we have enough transcript to analyze
+  if (transcriptBuffer.length === 0) {
+    return "No transcript available yet for analysis.";
+  }
+
+  // Check if we've just done an analysis recently (unless forced)
+  const now = Date.now();
+  if (!forceTrigger && now - lastAnalysisTime < 5000) {
+    return "Analysis requested too soon after the last one.";
+  }
+
+  // Check if we have at least one utterance from the candidate (source = "Other")
+  const hasOtherSpeaker = transcriptBuffer.some(item => item.source === "Other");
+  if (!hasOtherSpeaker) {
+    return "Waiting for the candidate to speak before providing analysis.";
+  }
+
+  // Check if there's enough new content since the last analysis
+  const newContentLength = transcriptBuffer.length - lastProcessedTranscriptLength;
+  if (!forceTrigger && newContentLength === 0) {
+    return "No new content since the last analysis.";
+  }
+
+  // Check if the total transcript text meets the minimum length requirement
+  const totalText = transcriptBuffer.map(item => item.text).join(" ");
+  if (totalText.length < ANALYSIS_MIN_TRANSCRIPT_LENGTH) {
+    return "Not enough conversation yet for meaningful analysis.";
+  }
+
+  // If we get here, perform the analysis
+  analysisPending = true;
+  lastAnalysisTime = now;
+  lastProcessedTranscriptLength = transcriptBuffer.length;
+
+  try {
+    logInfo("Performing interview analysis...");
+    const openRouterClient = createOpenRouterClient();
+    const systemPrompt = buildSystemPrompt();
+    const formattedTranscript = formatTranscriptForLLM(transcriptBuffer);
+
+    const response = await openRouterClient.chat.completions.create({
+      model: LLM_MODEL,
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: `Here is the current interview transcript. Provide your analysis and suggestions:\n\n${formattedTranscript}` }
+      ],
+      temperature: 0.3, // Lower temperature for more focused responses
+      max_tokens: 1000
+    });
+
+    // Extract and return the analysis
+    const analysisResult = response.choices[0]?.message?.content || "Analysis failed.";
+    logInfo("Analysis completed successfully.");
+    analysisPending = false;
+    return analysisResult;
+  } catch (error) {
+    logError("Error performing interview analysis:", error.message);
+    analysisPending = false;
+    return `Analysis failed due to error: ${error.message}`;
+  }
+}
+
+/**
+ * Check if analysis should be auto-triggered
+ * This is called when a speaker stops talking
+ * @param {string} source - The source of the utterance ('mic' or 'speaker')
+ */
+function checkAutoTriggerAnalysis(source) {
+  // Only trigger if:
+  // 1. Analysis mode is enabled
+  // 2. Auto triggering is enabled
+  // 3. The source is "speaker" (candidate)
+  // 4. We're not already doing an analysis
+  if (
+    ANALYSIS_MODE &&
+    ANALYSIS_AUTO_TRIGGER &&
+    source === 'speaker' &&
+    !analysisPending
+  ) {
+    logVerbose("Auto-triggering interview analysis after candidate speech...");
+    // Perform the analysis and send results to renderer
+    analyzeInterview().then(result => {
+      if (mainWindow) {
+        mainWindow.webContents.send("analysis:update", result);
+      }
+    });
+  }
+}
+
+/**
+ * Handle a text file upload
+ * @param {string} filePath - Path to the uploaded file
+ * @returns {Promise<string>} The file contents
+ */
+async function handleTextFileUpload(filePath) {
+  try {
+    const content = fs.readFileSync(filePath, 'utf8');
+    return content;
+  } catch (error) {
+    logError("Error reading text file:", error.message);
+    throw error;
+  }
+}
+
+/**
+ * Update the interview context
+ * @param {Object} context - New context object
+ * @returns {Object} The updated context
+ */
+function updateInterviewContext(context) {
+  interviewContext = { ...interviewContext, ...context };
+  
+  // Regenerate the system prompt with the new context
+  interviewContext.systemPrompt = buildSystemPrompt();
+  
+  return interviewContext;
+}
 
 function logVerbose(...args) {
   if (VERBOSE_LOGGING) {
@@ -1135,6 +1374,65 @@ app.whenReady().then(() => {
     logVerbose("Received 'audio:stop' request from renderer.");
     stopRecording();
     return { success: !isRecording };
+  });
+  
+  // Handle context text update
+  ipcMain.handle("context:save", (event, contextData) => {
+    logVerbose("Received 'context:save' request from renderer.");
+    try {
+      const updatedContext = updateInterviewContext(contextData);
+      logInfo("Interview context updated successfully.");
+      return { success: true, context: updatedContext };
+    } catch (error) {
+      logError("Failed to update interview context:", error.message);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  // Handle file uploads
+  ipcMain.handle("context:upload", async (event, filePath) => {
+    logVerbose("Received 'context:upload' request from renderer.");
+    try {
+      if (!filePath) {
+        // Open file dialog and get selected file
+        const result = await dialog.showOpenDialog({
+          properties: ['openFile'],
+          filters: [
+            { name: 'Text Files', extensions: ['txt', 'pdf'] }
+          ]
+        });
+        
+        if (result.canceled || result.filePaths.length === 0) {
+          return { success: false, error: "No file selected" };
+        }
+        
+        filePath = result.filePaths[0];
+      }
+      
+      // Handle text file
+      if (filePath.toLowerCase().endsWith('.txt')) {
+        const content = await handleTextFileUpload(filePath);
+        return { success: true, content, filePath };
+      }
+      // TODO: Add PDF handling if needed
+      
+      return { success: false, error: "Unsupported file type" };
+    } catch (error) {
+      logError("Failed to upload context file:", error.message);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  // Handle analysis request
+  ipcMain.handle("analysis:request", async () => {
+    logVerbose("Received 'analysis:request' request from renderer.");
+    try {
+      const analysis = await analyzeInterview(true); // force trigger
+      return { success: true, analysis };
+    } catch (error) {
+      logError("Failed to perform interview analysis:", error.message);
+      return { success: false, error: error.message };
+    }
   });
 
   ipcMain.handle("audio:test", async () => {

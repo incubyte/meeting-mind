@@ -8,6 +8,17 @@ const downloadTranscriptBtn = document.getElementById("downloadTranscriptBtn");
 const micMeterBar = document.getElementById("micMeterBar");
 const speakerMeterBar = document.getElementById("speakerMeterBar");
 
+// Interview context elements
+const contextFileInput = document.getElementById("contextFileInput");
+const uploadFileBtn = document.getElementById("uploadFileBtn"); 
+const contextTextArea = document.getElementById("contextTextArea");
+const saveContextBtn = document.getElementById("saveContextBtn");
+const contextStatusSpan = document.getElementById("contextStatus");
+
+// Analysis elements
+const requestAnalysisBtn = document.getElementById("requestAnalysisBtn");
+const analysisOutputDiv = document.getElementById("analysisOutput");
+
 let statusLog = ["App Initialized."];
 const MAX_STATUS_LINES = 20;
 
@@ -319,13 +330,115 @@ window.electronAPI.onRecordingStatus(({ isRecording, error }) => {
   }
 });
 
+// --- Context Management ---
+uploadFileBtn.addEventListener("click", async () => {
+  const filePath = contextFileInput.files[0]?.path;
+  if (!filePath) {
+    addStatusMessage("No file selected. Please select a file first.");
+    return;
+  }
+  
+  uploadFileBtn.disabled = true;
+  contextStatusSpan.textContent = "Uploading file...";
+  
+  try {
+    const result = await window.electronAPI.uploadContextFile(filePath);
+    if (result.success) {
+      contextTextArea.value = result.content;
+      contextStatusSpan.textContent = `File uploaded: ${result.filePath.split('/').pop()}`;
+      addStatusMessage(`Context file uploaded successfully.`);
+    } else {
+      contextStatusSpan.textContent = `Upload failed: ${result.error}`;
+      addStatusMessage(`Context file upload failed: ${result.error}`);
+    }
+  } catch (error) {
+    contextStatusSpan.textContent = "Upload failed";
+    addStatusMessage(`Error uploading context file: ${error.message}`);
+  } finally {
+    uploadFileBtn.disabled = false;
+  }
+});
+
+saveContextBtn.addEventListener("click", async () => {
+  const contextText = contextTextArea.value.trim();
+  if (!contextText) {
+    contextStatusSpan.textContent = "No context provided";
+    return;
+  }
+  
+  saveContextBtn.disabled = true;
+  contextStatusSpan.textContent = "Saving context...";
+  
+  try {
+    const result = await window.electronAPI.saveContext({
+      // For now, put all text in additionalContext
+      // Could add more structure later for separate job desc/candidate fields
+      additionalContext: contextText
+    });
+    
+    if (result.success) {
+      contextStatusSpan.textContent = "Context saved successfully";
+      addStatusMessage("Interview context saved successfully.");
+      
+      // Enable the analysis button if we have context
+      requestAnalysisBtn.disabled = false;
+    } else {
+      contextStatusSpan.textContent = `Save failed: ${result.error}`;
+      addStatusMessage(`Failed to save context: ${result.error}`);
+    }
+  } catch (error) {
+    contextStatusSpan.textContent = "Save failed";
+    addStatusMessage(`Error saving context: ${error.message}`);
+  } finally {
+    saveContextBtn.disabled = false;
+  }
+});
+
+// --- Analysis ---
+requestAnalysisBtn.addEventListener("click", async () => {
+  if (transcriptBuffer.length === 0) {
+    analysisOutputDiv.innerHTML = "No transcript available yet for analysis.";
+    return;
+  }
+  
+  requestAnalysisBtn.disabled = true;
+  analysisOutputDiv.innerHTML = "Requesting analysis...";
+  
+  try {
+    const result = await window.electronAPI.requestAnalysis();
+    if (result.success) {
+      // Format the analysis result with line breaks
+      const formattedAnalysis = result.analysis.replace(/\n/g, '<br>');
+      analysisOutputDiv.innerHTML = formattedAnalysis;
+    } else {
+      analysisOutputDiv.innerHTML = `Analysis failed: ${result.error}`;
+    }
+  } catch (error) {
+    analysisOutputDiv.innerHTML = `Error performing analysis: ${error.message}`;
+  } finally {
+    // Re-enable after a short delay to prevent spamming
+    setTimeout(() => {
+      requestAnalysisBtn.disabled = false;
+    }, 2000);
+  }
+});
+
+// Add analysis update listener
+window.electronAPI.onAnalysisUpdate((analysisResult) => {
+  // Format the analysis result with line breaks
+  const formattedAnalysis = analysisResult.replace(/\n/g, '<br>');
+  analysisOutputDiv.innerHTML = formattedAnalysis;
+});
+
 // --- Cleanup on unload ---
 window.addEventListener('beforeunload', () => {
     window.electronAPI.removeAllListeners('transcript:update');
     window.electronAPI.removeAllListeners('status:update');
     window.electronAPI.removeAllListeners('recording:status');
+    window.electronAPI.removeAllListeners('analysis:update');
 });
 
 // Initial UI state
 stopRecordingBtn.disabled = true;
+requestAnalysisBtn.disabled = true; // Disabled until context is provided
 addStatusMessage("Renderer process loaded.");

@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'"
+    />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Meeting Mind</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <h1>Meeting Mind</h1>
+
+    <div class="controls">
+      <button id="testAudioBtn">Test Audio Devices</button>
+      <button id="startRecordingBtn">Start Recording</button>
+      <button id="stopRecordingBtn" disabled>Stop Recording</button>
+    </div>
+
+    <div class="status">
+      <h2>Status</h2>
+      <div id="recordingStatus">Recording: Inactive</div>
+      <pre id="statusMessages">App Initialized.</pre>
+    </div>
+
+    <div class="transcript">
+      <h2>Transcript</h2>
+      <div id="transcriptOutput">
+        <!-- Transcript items will be added here -->
+      </div>
+    </div>
+
+    <script defer src="renderer.js"></script>
+  </body>
+</html>

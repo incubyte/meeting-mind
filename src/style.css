@@ -1,0 +1,122 @@
+body {
+    font-family: sans-serif;
+    padding: 20px;
+    background-color: #f4f4f4;
+    color: #333;
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    box-sizing: border-box;
+    margin: 0;
+  }
+
+  h1,
+  h2 {
+    color: #1a1a1a;
+    margin-top: 0;
+  }
+
+  .controls {
+    margin-bottom: 20px;
+    display: flex;
+    gap: 10px;
+  }
+
+  button {
+    padding: 10px 15px;
+    font-size: 1em;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    background-color: #007bff;
+    color: white;
+    transition: background-color 0.2s ease;
+  }
+
+  button:hover {
+    background-color: #0056b3;
+  }
+
+  button:disabled {
+    background-color: #cccccc;
+    cursor: not-allowed;
+  }
+
+  .status {
+    background-color: #e9ecef;
+    padding: 15px;
+    border-radius: 5px;
+    margin-bottom: 20px;
+    height: 250px; /* Increased height from 150px to 250px */
+    display: flex;
+    flex-direction: column;
+  }
+
+  #recordingStatus {
+    font-weight: bold;
+    margin-bottom: 10px;
+  }
+
+  #statusMessages {
+    font-family: monospace;
+    white-space: pre-wrap; /* Wrap long lines */
+    word-wrap: break-word; /* Break words if necessary */
+    background-color: #fff;
+    border: 1px solid #ccc;
+    padding: 10px;
+    flex-grow: 1; /* Take remaining space */
+    overflow-y: auto; /* Add scrollbar if content overflows */
+    font-size: 0.9em;
+    color: #555;
+    max-height: 200px; /* Added explicit max-height */
+    min-height: 200px; /* Added min-height to ensure consistent size */
+  }
+
+  .transcript {
+    background-color: #ffffff;
+    padding: 15px;
+    border-radius: 5px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    flex-grow: 1; /* Take remaining vertical space */
+    display: flex;
+    flex-direction: column;
+    overflow: hidden; /* Prevent transcript from overflowing body */
+  }
+
+  #transcriptOutput {
+    border: 1px solid #eee;
+    padding: 10px;
+    height: 100%; /* Fill parent */
+    overflow-y: auto; /* Enable scrolling */
+    flex-grow: 1;
+  }
+
+  .transcript-item {
+    margin-bottom: 10px;
+    padding-bottom: 10px;
+    border-bottom: 1px dashed #eee;
+  }
+
+  .transcript-item:last-child {
+    border-bottom: none;
+  }
+
+  .transcript-source {
+    font-weight: bold;
+    margin-right: 8px;
+    color: #0056b3;
+  }
+
+  .transcript-source-You {
+    color: #28a745; /* Green for 'You' */
+  }
+
+  .transcript-source-Other {
+    color: #dc3545; /* Red for 'Other' */
+  }
+
+  .transcript-timestamp {
+    font-size: 0.8em;
+    color: #6c757d;
+    margin-left: 10px;
+  }

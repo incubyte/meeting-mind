@@ -23,29 +23,61 @@ function addStatusMessage(message) {
 
 function updateTranscript(transcriptItems) {
   transcriptOutputDiv.innerHTML = ""; // Clear current transcript
-  transcriptItems.forEach((item) => {
-    const itemDiv = document.createElement("div");
-    itemDiv.classList.add("transcript-item");
-
-    const sourceSpan = document.createElement("span");
-    sourceSpan.classList.add("transcript-source", `transcript-source-${item.source}`);
-    sourceSpan.textContent = `${item.source}:`; // e.g., "You:", "Other:"
-
-    const textSpan = document.createElement("span");
-    textSpan.classList.add("transcript-text");
-    textSpan.textContent = item.text;
-
-    const timeSpan = document.createElement("span");
-    timeSpan.classList.add("transcript-timestamp");
-    timeSpan.textContent = `(${item.timestamp.toLocaleTimeString()})`;
-
-    itemDiv.appendChild(sourceSpan);
-    itemDiv.appendChild(textSpan);
-    itemDiv.appendChild(timeSpan);
-    transcriptOutputDiv.appendChild(itemDiv);
+  
+  // Create a chat-style container
+  const chatContainer = document.createElement("div");
+  chatContainer.classList.add("chat-container");
+  
+  // Create a header to show we're in a chat view
+  const chatHeader = document.createElement("div");
+  chatHeader.classList.add("chat-header");
+  chatHeader.innerHTML = "<span class='chat-participant you'>You</span> and <span class='chat-participant other'>Other Person</span>";
+  chatContainer.appendChild(chatHeader);
+  
+  // Create the messages area
+  const messagesArea = document.createElement("div");
+  messagesArea.classList.add("chat-messages");
+  
+  // Ensure the transcript items are sorted by timestamp
+  const sortedItems = [...transcriptItems].sort((a, b) => {
+    const timeA = a.timestamp instanceof Date ? a.timestamp : new Date(a.timestamp);
+    const timeB = b.timestamp instanceof Date ? b.timestamp : new Date(b.timestamp);
+    return timeA - timeB;
   });
+  
+  // Add messages to the chat
+  sortedItems.forEach((item) => {
+    const messageDiv = document.createElement("div");
+    messageDiv.classList.add("chat-message", item.source === "You" ? "message-you" : "message-other");
+    
+    const bubbleDiv = document.createElement("div");
+    bubbleDiv.classList.add("message-bubble");
+    
+    const nameSpan = document.createElement("div");
+    nameSpan.classList.add("message-name");
+    nameSpan.textContent = item.source;
+    
+    const textDiv = document.createElement("div");
+    textDiv.classList.add("message-text");
+    textDiv.textContent = item.text;
+    
+    const timeSpan = document.createElement("div");
+    timeSpan.classList.add("message-time");
+    const messageTime = item.timestamp instanceof Date ? item.timestamp : new Date(item.timestamp);
+    timeSpan.textContent = messageTime.toLocaleTimeString();
+    
+    bubbleDiv.appendChild(nameSpan);
+    bubbleDiv.appendChild(textDiv);
+    bubbleDiv.appendChild(timeSpan);
+    messageDiv.appendChild(bubbleDiv);
+    messagesArea.appendChild(messageDiv);
+  });
+  
+  chatContainer.appendChild(messagesArea);
+  transcriptOutputDiv.appendChild(chatContainer);
+  
   // Scroll to bottom
-  transcriptOutputDiv.scrollTop = transcriptOutputDiv.scrollHeight;
+  messagesArea.scrollTop = messagesArea.scrollHeight;
 }
 
 // --- Button Event Listeners ---

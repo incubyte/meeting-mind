@@ -10,6 +10,29 @@ const MAX_STATUS_LINES = 20;
 
 function addStatusMessage(message) {
   console.log("Status Update:", message); // Log to console as well
+  
+  // Special handling for mic level messages
+  if (message.startsWith("[MIC] Level:")) {
+    // Update the recording status with level info
+    const level = parseInt(message.match(/Level: (\d+)/)[1]);
+    const status = message.includes("SPEECH") ? "SPEAKING" : "silent";
+    
+    // Update the recording status display
+    const recordingStatusText = recordingStatusDiv.textContent.split('(')[0];
+    recordingStatusDiv.textContent = `${recordingStatusText} (Mic: ${level} - ${status})`;
+    
+    // Use color to indicate speech detection
+    if (status === "SPEAKING") {
+      recordingStatusDiv.style.color = "#28a745"; // Green when speaking
+    } else {
+      recordingStatusDiv.style.color = "black"; // Default color when silent
+    }
+    
+    // Don't add these messages to the log to avoid cluttering
+    return;
+  }
+  
+  // For other messages, proceed as normal
   // Remove timestamp prefixes if they exist for cleaner UI display
   const cleanMessage = message.replace(/^\[(INFO|WARN|ERROR|VERBOSE)\]\s*/, "");
   statusLog.push(cleanMessage);
@@ -165,6 +188,9 @@ window.electronAPI.onRecordingStatus(({ isRecording, error }) => {
     startRecordingBtn.disabled = true;
     stopRecordingBtn.disabled = false;
     testAudioBtn.disabled = true;
+    
+    // Add an initial status message about the VAD system
+    addStatusMessage("Voice Activity Detection enabled - watching for speech...");
   } else {
     recordingStatusDiv.textContent = `Recording: Inactive ${error ? '(Error)' : ''}`;
     recordingStatusDiv.style.color = error ? "red" : "black";

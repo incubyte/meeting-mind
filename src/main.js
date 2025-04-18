@@ -24,10 +24,333 @@ const DEBUG_RECORDINGS_DIR = path.join(path.dirname(import.meta.dirname), "tmp")
 const SILENCE_THRESHOLD = 1000;            // Threshold of sound level to consider audio to have speech
 const SAMPLES_TO_CHECK = 100;              // Number of samples to check in the audio file
 
+// Voice Activity Detection (VAD) settings
+const VAD_AMPLITUDE_THRESHOLD = 80;       // Amplitude threshold for speech detection (higher than silence for hysteresis)
+const VAD_SILENCE_THRESHOLD = 50;         // Lower threshold for detecting silence (lower than speech for hysteresis)
+const VAD_SILENCE_DURATION_MS = 1500;      // How long silence must persist to end an utterance
+const VAD_MIN_UTTERANCE_MS = 500;          // Minimum utterance duration to be considered valid
+const VAD_MAX_UTTERANCE_MS = 15000;        // Maximum utterance length before forced split (15s)
+const VAD_SAMPLE_RATE = 44100;             // Audio sample rate
+const VAD_FRAME_SIZE = 4096;               // Size of audio frames for processing
+const VAD_BUFFER_LIMIT = 1000;             // Maximum number of buffers to store (to prevent memory issues)
+
 // Transcript intelligent merging settings
 const TRANSCRIPT_SIMILARITY_THRESHOLD = 0.7;   // Similarity threshold to detect duplicates (0-1)
 const TRANSCRIPT_CONTINUATION_WINDOW = 10000;  // Time window (ms) to consider continuing a message from same speaker
 const MAX_TRANSCRIPT_ENTRIES = 100;            // Maximum number of transcript entries to keep
+
+/**
+ * Process audio frames for Voice Activity Detection (VAD)
+ * This is the core function for utterance detection
+ * 
+ * @param {Buffer} audioBuffer - Raw audio data buffer
+ * @param {string} source - Audio source ('mic' or 'speaker')
+ */
+function processAudioForVAD(audioBuffer, source) {
+  const state = vadState[source];
+  const now = Date.now();
+  
+  // Extract audio samples (assuming 16-bit PCM audio)
+  const samples = extractSamplesFromBuffer(audioBuffer);
+  
+  // Calculate amplitude (speech level)
+  const amplitude = calculateAmplitude(samples);
+  state.lastAmplitude = amplitude;
+  
+  // Enhanced level logging for debugging
+  // For mic, log more frequently to better understand the amplitude
+  if (source === 'mic' && state.frameCount % 5 === 0) {
+    const thresholdInfo = `threshold=${VAD_AMPLITUDE_THRESHOLD}/${VAD_SILENCE_THRESHOLD}`;
+    logVerbose(`${source} VAD: amplitude=${amplitude.toFixed(2)}, active=${state.isActive}, silence=${state.isSilence}, ${thresholdInfo}`);
+    
+    // Log to UI for better visibility
+    if (state.frameCount % 20 === 0 && mainWindow) {
+      const levelStatus = amplitude > VAD_AMPLITUDE_THRESHOLD ? "SPEECH" : "quiet";
+      mainWindow.webContents.send("status:update", `[MIC] Level: ${amplitude.toFixed(0)} (${levelStatus})`);
+    }
+  } 
+  // For speaker, log less frequently
+  else if (source === 'speaker' && state.frameCount % 30 === 0) {
+    logVerbose(`${source} VAD: amplitude=${amplitude.toFixed(2)}, active=${state.isActive}, silence=${state.isSilence}`);
+  }
+  
+  // Safety check - if our buffer gets too large, we need to finalize and send it
+  if (state.audioBuffers.length > VAD_BUFFER_LIMIT) {
+    if (state.isActive) {
+      logWarn(`${source} VAD: Buffer limit reached, forcing utterance end`);
+      finalizeUtterance(source, "buffer-limit");
+    } else {
+      // Just clear buffers if we're not in an active utterance
+      state.audioBuffers = [];
+    }
+  }
+  
+  // Always store the frame (we'll keep a rolling buffer of recent audio)
+  state.audioBuffers.push(audioBuffer);
+  state.frameCount++;
+  
+  // VAD state machine
+  if (!state.isActive) {
+    // Not in an active utterance - check if we should start one
+    if (amplitude > VAD_AMPLITUDE_THRESHOLD) {
+      // Speech detected - start a new utterance
+      state.isActive = true;
+      state.isSilence = false;
+      state.utteranceStart = now;
+      state.silenceStart = null;
+      
+      // Create a new output file for this utterance
+      state.utteranceCount++;
+      state.audioPath = path.join(
+        DEBUG_RECORDINGS_DIR, 
+        `vad-${source}-utterance-${state.utteranceCount}-${now}.wav`
+      );
+      
+      logInfo(`${source} VAD: Speech started (amplitude=${amplitude})`);
+      
+      // Initialize the WAV file with an empty header - we'll fill it later
+      initializeWavFile(state.audioPath, source === 'mic' ? 1 : 2);
+    }
+  } else {
+    // In an active utterance
+    
+    // Check for max duration (force split long utterances)
+    const utteranceDuration = now - state.utteranceStart;
+    if (utteranceDuration > VAD_MAX_UTTERANCE_MS) {
+      logInfo(`${source} VAD: Maximum utterance duration reached (${utteranceDuration}ms)`);
+      finalizeUtterance(source, "max-duration");
+      
+      // Start a new utterance immediately if still speaking
+      if (amplitude > VAD_AMPLITUDE_THRESHOLD) {
+        state.isActive = true;
+        state.isSilence = false;
+        state.utteranceStart = now;
+        state.utteranceCount++;
+        state.audioPath = path.join(
+          DEBUG_RECORDINGS_DIR, 
+          `vad-${source}-utterance-${state.utteranceCount}-${now}.wav`
+        );
+        initializeWavFile(state.audioPath, source === 'mic' ? 1 : 2);
+      }
+      return;
+    }
+    
+    // Update the utterance file with the new audio data
+    if (state.audioPath) {
+      appendToWavFile(state.audioPath, audioBuffer);
+    }
+    
+    // Detect silence (using hysteresis - lower threshold for detecting silence)
+    if (amplitude < VAD_SILENCE_THRESHOLD) {
+      if (!state.isSilence) {
+        // Just entered silence
+        state.isSilence = true;
+        state.silenceStart = now;
+        logVerbose(`${source} VAD: Potential speech end, entering silence (amplitude=${amplitude})`);
+      } else {
+        // Continuing silence - check if it's been silent long enough to end the utterance
+        const silenceDuration = now - state.silenceStart;
+        if (silenceDuration > VAD_SILENCE_DURATION_MS) {
+          // Silence persisted long enough - end the utterance
+          logInfo(`${source} VAD: Speech ended after ${utteranceDuration}ms (silence=${silenceDuration}ms)`);
+          finalizeUtterance(source, "silence");
+        }
+      }
+    } else {
+      // Still hearing speech
+      if (state.isSilence) {
+        // Was silent but speech resumed
+        logVerbose(`${source} VAD: Speech resumed after ${now - state.silenceStart}ms of silence`);
+        state.isSilence = false;
+        state.silenceStart = null;
+      }
+    }
+  }
+}
+
+/**
+ * Finalize an utterance, process it, and reset state
+ * 
+ * @param {string} source - Audio source ('mic' or 'speaker')
+ * @param {string} reason - Why the utterance was finalized
+ */
+function finalizeUtterance(source, reason) {
+  const state = vadState[source];
+  const now = Date.now();
+  
+  if (!state.isActive || !state.utteranceStart) {
+    // Not in an active utterance - nothing to do
+    state.isActive = false;
+    state.isSilence = true;
+    state.audioBuffers = [];
+    return;
+  }
+  
+  const utteranceDuration = now - state.utteranceStart;
+  
+  // Only process if the utterance is long enough
+  if (utteranceDuration >= VAD_MIN_UTTERANCE_MS) {
+    logInfo(`${source} VAD: Processing utterance of ${utteranceDuration}ms (reason: ${reason})`);
+    
+    // Complete the WAV file
+    finalizeWavFile(state.audioPath);
+    
+    // Send the utterance for transcription
+    if (fs.existsSync(state.audioPath)) {
+      // Send to transcription API - using source mapping (mic → "You", speaker → "Other")
+      const transcriptSource = source === 'mic' ? 'You' : 'Other';
+      transcribeAudioChunk(state.audioPath, transcriptSource);
+    } else {
+      logError(`${source} VAD: Utterance file not found: ${state.audioPath}`);
+    }
+  } else {
+    logVerbose(`${source} VAD: Utterance too short (${utteranceDuration}ms), discarding`);
+    // Remove the unfinished WAV file
+    if (state.audioPath && fs.existsSync(state.audioPath)) {
+      fs.unlinkSync(state.audioPath);
+    }
+  }
+  
+  // Reset state
+  state.isActive = false;
+  state.isSilence = true;
+  state.utteranceStart = null;
+  state.silenceStart = null;
+  state.audioBuffers = [];
+  state.audioPath = null;
+}
+
+/**
+ * Extract samples from a raw audio buffer
+ * 
+ * @param {Buffer} buffer - Raw audio data
+ * @returns {Int16Array} - Array of audio samples
+ */
+function extractSamplesFromBuffer(buffer) {
+  // Create a view into the buffer as 16-bit signed integers (PCM format)
+  return new Int16Array(buffer.buffer, buffer.byteOffset, buffer.length / 2);
+}
+
+/**
+ * Calculate the amplitude (energy level) of audio samples
+ * 
+ * @param {Int16Array} samples - Audio samples
+ * @returns {number} - Amplitude value
+ */
+function calculateAmplitude(samples) {
+  // Take a subset of samples for performance
+  const step = Math.max(1, Math.floor(samples.length / 100));
+  let sum = 0;
+  let count = 0;
+  
+  // Calculate RMS (root mean square) of the samples
+  for (let i = 0; i < samples.length; i += step) {
+    sum += samples[i] * samples[i];
+    count++;
+  }
+  
+  if (count === 0) return 0;
+  
+  // Return RMS amplitude
+  return Math.sqrt(sum / count);
+}
+
+/**
+ * Initialize a WAV file with a proper header
+ * 
+ * @param {string} filePath - Path to the WAV file
+ * @param {number} channels - Number of audio channels (1=mono, 2=stereo)
+ */
+function initializeWavFile(filePath, channels) {
+  try {
+    // Create the directory if it doesn't exist
+    const dir = path.dirname(filePath);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+    
+    // Create a WAV header
+    const headerBuffer = Buffer.alloc(44); // WAV header is 44 bytes
+    
+    // RIFF chunk descriptor
+    headerBuffer.write('RIFF', 0);
+    headerBuffer.writeUInt32LE(0, 4); // File size - 8 (placeholder, will update later)
+    headerBuffer.write('WAVE', 8);
+    
+    // fmt sub-chunk
+    headerBuffer.write('fmt ', 12);
+    headerBuffer.writeUInt32LE(16, 16); // Sub-chunk size (16 for PCM)
+    headerBuffer.writeUInt16LE(1, 20); // Audio format (1 for PCM)
+    headerBuffer.writeUInt16LE(channels, 22); // Number of channels
+    headerBuffer.writeUInt32LE(VAD_SAMPLE_RATE, 24); // Sample rate
+    
+    // Calculate bytes per sample and other header fields
+    const bytesPerSample = 2; // 16-bit = 2 bytes
+    const blockAlign = channels * bytesPerSample;
+    const byteRate = VAD_SAMPLE_RATE * blockAlign;
+    
+    headerBuffer.writeUInt32LE(byteRate, 28); // Byte rate
+    headerBuffer.writeUInt16LE(blockAlign, 32); // Block align
+    headerBuffer.writeUInt16LE(bytesPerSample * 8, 34); // Bits per sample
+    
+    // data sub-chunk
+    headerBuffer.write('data', 36);
+    headerBuffer.writeUInt32LE(0, 40); // Data size (placeholder, will update later)
+    
+    // Write the header to the file
+    fs.writeFileSync(filePath, headerBuffer);
+    logVerbose(`Initialized WAV file: ${filePath}`);
+  } catch (err) {
+    logError(`Failed to initialize WAV file: ${err.message}`);
+  }
+}
+
+/**
+ * Append audio data to an existing WAV file
+ * 
+ * @param {string} filePath - Path to the WAV file
+ * @param {Buffer} audioBuffer - Audio data to append
+ */
+function appendToWavFile(filePath, audioBuffer) {
+  try {
+    // Append the audio data to the file
+    fs.appendFileSync(filePath, audioBuffer);
+  } catch (err) {
+    logError(`Failed to append to WAV file: ${err.message}`);
+  }
+}
+
+/**
+ * Finalize a WAV file by updating the header with the correct file size
+ * 
+ * @param {string} filePath - Path to the WAV file
+ */
+function finalizeWavFile(filePath) {
+  try {
+    // Get the file size
+    const stats = fs.statSync(filePath);
+    const fileSize = stats.size;
+    
+    // Update the file size in the header
+    const headerBuffer = Buffer.alloc(8);
+    
+    // RIFF chunk size (file size - 8)
+    headerBuffer.writeUInt32LE(fileSize - 8, 0);
+    
+    // data chunk size (file size - 44)
+    headerBuffer.writeUInt32LE(fileSize - 44, 4);
+    
+    // Open the file and update the header fields
+    const fd = fs.openSync(filePath, 'r+');
+    fs.writeSync(fd, headerBuffer.slice(0, 4), 0, 4, 4); // Update RIFF chunk size
+    fs.writeSync(fd, headerBuffer.slice(4, 8), 0, 4, 40); // Update data chunk size
+    fs.closeSync(fd);
+    
+    logVerbose(`Finalized WAV file: ${filePath} (size=${fileSize} bytes)`);
+  } catch (err) {
+    logError(`Failed to finalize WAV file: ${err.message}`);
+  }
+}
 
 /**
  * Check if an audio file contains actual speech/sound rather than just silence
@@ -122,6 +445,32 @@ let speakerFileStream = null;
 let speakerLoopbackDevice = null;
 let isRecording = false;
 let recordingInterval = null;
+
+// Voice Activity Detection (VAD) state tracking
+let vadState = {
+  mic: {
+    isActive: false,        // Whether speech is currently detected
+    isSilence: true,        // Whether we're in a silent period
+    utteranceStart: null,   // When the current utterance started
+    silenceStart: null,     // When the current silence started
+    audioBuffers: [],       // Audio buffers for the current utterance
+    frameCount: 0,          // Number of frames processed
+    lastAmplitude: 0,       // Last detected amplitude
+    audioPath: null,        // Path to the current utterance audio file
+    utteranceCount: 0,      // Counter for utterances from this source
+  },
+  speaker: {
+    isActive: false,
+    isSilence: true,
+    utteranceStart: null,
+    silenceStart: null,
+    audioBuffers: [],
+    frameCount: 0,
+    lastAmplitude: 0,
+    audioPath: null,
+    utteranceCount: 0,
+  }
+};
 // Enhanced transcript buffer with additional properties for smart merging
 let transcriptBuffer = []; // { id: number, timestamp: Date, lastUpdated: Date, source: string, text: string }[]
 let chunkCounter = 0;
@@ -511,6 +860,31 @@ async function startRecording() {
   let micStartSuccess = false;
   let speakerStartSuccess = false;
 
+  // Reset VAD state
+  vadState.mic = {
+    isActive: false,
+    isSilence: true,
+    utteranceStart: null,
+    silenceStart: null,
+    audioBuffers: [],
+    frameCount: 0,
+    lastAmplitude: 0,
+    audioPath: null,
+    utteranceCount: 0,
+  };
+  
+  vadState.speaker = {
+    isActive: false,
+    isSilence: true,
+    utteranceStart: null,
+    silenceStart: null,
+    audioBuffers: [],
+    frameCount: 0,
+    lastAmplitude: 0,
+    audioPath: null,
+    utteranceCount: 0,
+  };
+
   try {
     logVerbose("Starting microphone recorder...");
     micRecorder.start();
@@ -527,25 +901,36 @@ async function startRecording() {
     const micStream = micRecorder.stream(); // Get stream reference AFTER starting
     
     if (micStream) {
+      // Handle errors and stream events
       micStream.on("error", (err) => {
         logError("Mic Recorder Stream Error:", err);
       });
       
       micStream.on("close", (code) => {
         logWarn(`Mic recording process exited (Code: ${code})`);
+        // Finalize any active utterance
+        if (vadState.mic.isActive) {
+          finalizeUtterance('mic', 'stream-closed');
+        }
       });
       
       micStream.on("end", () => {
         logVerbose("Microphone recorder stream ended.");
       });
       
-      // Set up a direct pipe to a continuous file for testing
+      // Set up continuous file for debugging
       if (DEBUG_SAVE_RECORDINGS) {
         const debugMicFile = path.join(DEBUG_RECORDINGS_DIR, `continuous-mic-${Date.now()}.wav`);
         const debugMicStream = fs.createWriteStream(debugMicFile, { encoding: "binary" });
         micStream.pipe(debugMicStream);
         logInfo(`DEBUG: Writing continuous mic recording to ${debugMicFile}`);
       }
+      
+      // Set up data handler for VAD processing
+      micStream.on("data", (chunk) => {
+        // Process audio chunk for Voice Activity Detection
+        processAudioForVAD(chunk, 'mic');
+      });
     } else {
       logError("Failed to get microphone stream even after start");
       micStartSuccess = false;
@@ -569,25 +954,36 @@ async function startRecording() {
     const speakerStream = speakerRecorder.stream(); // Get stream reference AFTER starting
     
     if (speakerStream) {
+      // Handle errors and stream events
       speakerStream.on("error", (err) => {
         logError("Speaker Recorder Stream Error:", err);
       });
       
       speakerStream.on("close", (code) => {
         logWarn(`Speaker recording process exited (Code: ${code})`);
+        // Finalize any active utterance
+        if (vadState.speaker.isActive) {
+          finalizeUtterance('speaker', 'stream-closed');
+        }
       });
       
       speakerStream.on("end", () => {
         logVerbose("Speaker recorder stream ended.");
       });
       
-      // Set up a direct pipe to a continuous file for testing
+      // Set up continuous file for debugging
       if (DEBUG_SAVE_RECORDINGS) {
         const debugSpeakerFile = path.join(DEBUG_RECORDINGS_DIR, `continuous-speaker-${Date.now()}.wav`);
         const debugSpeakerStream = fs.createWriteStream(debugSpeakerFile, { encoding: "binary" });
         speakerStream.pipe(debugSpeakerStream);
         logInfo(`DEBUG: Writing continuous speaker recording to ${debugSpeakerFile}`);
       }
+      
+      // Set up data handler for VAD processing
+      speakerStream.on("data", (chunk) => {
+        // Process audio chunk for Voice Activity Detection
+        processAudioForVAD(chunk, 'speaker');
+      });
     } else {
       logError("Failed to get speaker stream even after start");
       speakerStartSuccess = false;
@@ -602,14 +998,17 @@ async function startRecording() {
   }
 
   isRecording = true;
-  logInfo(`Recording started. Processing chunks every ${RECORDING_CHUNK_DURATION_SECONDS} seconds.`);
+  logInfo(`Recording started. Using Voice Activity Detection (VAD) for speech processing.`);
   mainWindow.webContents.send("recording:status", { isRecording: true });
-
-  // --- Setup Chunk Processing Interval ---
+  
+  // We don't need the processing interval anymore since we're using VAD
+  // But we'll keep a status update interval to provide some UI feedback
   recordingInterval = setInterval(() => {
     if (!isRecording) return;
-    processAudioChunk();
-  }, RECORDING_CHUNK_DURATION_SECONDS * 1000);
+    // Log status periodically
+    logVerbose(`Mic status: active=${vadState.mic.isActive}, amplitude=${vadState.mic.lastAmplitude}`);
+    logVerbose(`Speaker status: active=${vadState.speaker.isActive}, amplitude=${vadState.speaker.lastAmplitude}`);
+  }, 5000);
 }
 
 function stopRecording() {
@@ -622,6 +1021,17 @@ function stopRecording() {
   if (recordingInterval) {
     clearInterval(recordingInterval);
     recordingInterval = null;
+  }
+
+  // Finalize any active utterances
+  if (vadState.mic.isActive) {
+    logInfo("Finalizing active microphone utterance before stopping");
+    finalizeUtterance('mic', 'recording-stopped');
+  }
+  
+  if (vadState.speaker.isActive) {
+    logInfo("Finalizing active speaker utterance before stopping");
+    finalizeUtterance('speaker', 'recording-stopped');
   }
 
   // Stop recorders
@@ -654,104 +1064,38 @@ function stopRecording() {
     speakerFileStream = null;
   }
 
+  // Reset VAD state
+  vadState.mic = {
+    isActive: false,
+    isSilence: true,
+    utteranceStart: null,
+    silenceStart: null,
+    audioBuffers: [],
+    frameCount: 0,
+    lastAmplitude: 0,
+    audioPath: null,
+    utteranceCount: 0,
+  };
+  
+  vadState.speaker = {
+    isActive: false,
+    isSilence: true,
+    utteranceStart: null,
+    silenceStart: null,
+    audioBuffers: [],
+    frameCount: 0,
+    lastAmplitude: 0,
+    audioPath: null,
+    utteranceCount: 0,
+  };
+
   isRecording = false;
   logInfo("Recording stopped.");
   mainWindow.webContents.send("recording:status", { isRecording: false });
 }
 
-// --- Chunk Processing Logic ---
-function processAudioChunk() {
-  if (!isRecording) return;
-
-  chunkCounter++;
-  const timestamp = Date.now();
-  const chunkStartTime = new Date().toLocaleTimeString();
-  logVerbose(`Starting chunk ${chunkCounter} at ${chunkStartTime}, chunk size: ${RECORDING_CHUNK_DURATION_SECONDS}s`);
-  
-  // Instead of stopping and starting the recorders, we'll use the continuous recordings
-  // that are already being saved to the debug files, and transcribe those
-  if (!DEBUG_SAVE_RECORDINGS) {
-    logWarn("DEBUG_SAVE_RECORDINGS is disabled, cannot process chunks without continuous recordings");
-    return;
-  }
-  
-  // Find the latest continuous recordings in our debug folder
-  try {
-    // Create the debug directory if it doesn't exist
-    if (!fs.existsSync(DEBUG_RECORDINGS_DIR)) {
-      fs.mkdirSync(DEBUG_RECORDINGS_DIR, { recursive: true });
-      logVerbose(`Created debug recordings directory: ${DEBUG_RECORDINGS_DIR}`);
-    }
-    
-    const micChunkFile = path.join(DEBUG_RECORDINGS_DIR, `chunk-mic-${timestamp}-${chunkCounter}.wav`);
-    const speakerChunkFile = path.join(DEBUG_RECORDINGS_DIR, `chunk-speaker-${timestamp}-${chunkCounter}.wav`);
-
-    logVerbose(`Processing chunk ${chunkCounter} using continuous recordings...`);
-    
-    // Look for continuous recording files
-    const files = fs.readdirSync(DEBUG_RECORDINGS_DIR);
-    const micFiles = files.filter(f => f.startsWith('continuous-mic-'));
-    const speakerFiles = files.filter(f => f.startsWith('continuous-speaker-'));
-    
-    if (micFiles.length > 0 && speakerFiles.length > 0) {
-      // Sort by timestamp to get most recent
-      micFiles.sort();
-      speakerFiles.sort();
-      
-      const latestMicFile = path.join(DEBUG_RECORDINGS_DIR, micFiles[micFiles.length - 1]);
-      const latestSpeakerFile = path.join(DEBUG_RECORDINGS_DIR, speakerFiles[speakerFiles.length - 1]);
-      
-      logVerbose(`Using latest mic file: ${latestMicFile}`);
-      logVerbose(`Using latest speaker file: ${latestSpeakerFile}`);
-      
-      // Copy the files for this chunk
-      fs.copyFileSync(latestMicFile, micChunkFile);
-      fs.copyFileSync(latestSpeakerFile, speakerChunkFile);
-      
-      // Get file stats
-      const micStats = fs.statSync(micChunkFile);
-      const speakerStats = fs.statSync(speakerChunkFile);
-      
-      logVerbose(`Mic chunk file size: ${micStats.size} bytes`);
-      logVerbose(`Speaker chunk file size: ${speakerStats.size} bytes`);
-      
-      // Minimum size for a valid WAV file (at least WAV header + some content)
-      const minValidSize = 1000;
-      
-      // Check for silence in microphone audio before transcribing
-      if (micStats.size > minValidSize) {
-        // Check if the audio contains actual sound or just silence
-        const hasSpeech = checkForSpeechInAudio(micChunkFile);
-        if (hasSpeech) {
-          logVerbose(`Mic audio contains speech, sending for transcription`);
-          transcribeAudioChunk(micChunkFile, "You");
-        } else {
-          logInfo(`Mic audio appears to be silence, skipping OpenAI API call`);
-        }
-      } else {
-        logWarn(`Mic chunk file too small: ${micStats.size} bytes, skipping transcription`);
-      }
-      
-      // Check for silence in speaker audio before transcribing
-      if (speakerStats.size > minValidSize) {
-        // Check if the audio contains actual sound or just silence
-        const hasSpeech = checkForSpeechInAudio(speakerChunkFile);
-        if (hasSpeech) {
-          logVerbose(`Speaker audio contains speech, sending for transcription`);
-          transcribeAudioChunk(speakerChunkFile, "Other");
-        } else {
-          logInfo(`Speaker audio appears to be silence, skipping OpenAI API call`);
-        }
-      } else {
-        logWarn(`Speaker chunk file too small: ${speakerStats.size} bytes, skipping transcription`);
-      }
-    } else {
-      logWarn("No continuous recordings found for transcription");
-    }
-  } catch (err) {
-    logError(`Error processing continuous recordings: ${err.message}`);
-  }
-}
+// --- Voice Activity Detection (VAD) is now handling audio processing ---
+// The previous chunk-based approach has been replaced by real-time speech detection
 
 // --- Electron App Setup ---
 function createWindow() {
@@ -800,7 +1144,82 @@ app.whenReady().then(() => {
     const speakerOk = !!device;
     const message = `Test Results:\n- Microphone: ${micOk ? 'OK (Default)' : 'Error'}\n- Speaker Loopback: ${speakerOk ? `OK ('${device}')` : 'Error (pactl failed or PulseAudio issue)'}`;
     logInfo(message);
+    
+    // Also show current VAD threshold settings
+    const thresholdInfo = `VAD Thresholds: Speech=${VAD_AMPLITUDE_THRESHOLD}, Silence=${VAD_SILENCE_THRESHOLD}`;
+    logInfo(thresholdInfo);
     mainWindow.webContents.send("status:update", message); // Send detailed status
+    mainWindow.webContents.send("status:update", thresholdInfo); // Send threshold info
+    
+    // Begin microphone level calibration
+    if (micOk) {
+      mainWindow.webContents.send("status:update", "Starting mic level calibration (5 seconds)...");
+      
+      // Create a temporary recorder to measure mic levels
+      const tempRecorder = new AudioRecorder({
+        program: 'rec',
+        device: null, // Default microphone
+        bits: 16,
+        channels: 1,
+        encoding: 'signed-integer',
+        format: 'S16_LE',
+        rate: 44100,
+        type: 'wav',
+        silence: 0
+      });
+      
+      let maxAmplitude = 0;
+      let minAmplitude = Infinity;
+      let sampleCount = 0;
+      let sumAmplitude = 0;
+      
+      // Start recording and collect amplitude data
+      try {
+        tempRecorder.start();
+        const stream = tempRecorder.stream();
+        
+        // Process data chunks to analyze amplitude
+        stream.on('data', (chunk) => {
+          const samples = extractSamplesFromBuffer(chunk);
+          const amplitude = calculateAmplitude(samples);
+          
+          maxAmplitude = Math.max(maxAmplitude, amplitude);
+          if (amplitude > 0) minAmplitude = Math.min(minAmplitude, amplitude); 
+          sumAmplitude += amplitude;
+          sampleCount++;
+          
+          // Update UI with current level
+          mainWindow.webContents.send("status:update", `[MIC] Level: ${amplitude.toFixed(0)} (calibrating)`);
+        });
+        
+        // Stop after 5 seconds and show results
+        setTimeout(() => {
+          try {
+            tempRecorder.stop();
+            const avgAmplitude = sumAmplitude / sampleCount;
+            
+            // Calculate recommended thresholds
+            const recommendedThreshold = Math.max(200, Math.ceil(avgAmplitude * 2));
+            const recommendedSilence = Math.max(100, Math.ceil(avgAmplitude));
+            
+            const calibrationResult = 
+              `Mic Calibration Results:\n` +
+              `- Max level: ${maxAmplitude.toFixed(0)}\n` +
+              `- Min level: ${minAmplitude === Infinity ? 'N/A' : minAmplitude.toFixed(0)}\n` +
+              `- Avg level: ${avgAmplitude.toFixed(0)}\n` +
+              `- Recommended thresholds: Speech=${recommendedThreshold}, Silence=${recommendedSilence}`;
+            
+            logInfo(calibrationResult);
+            mainWindow.webContents.send("status:update", calibrationResult);
+          } catch (err) {
+            logError("Error stopping calibration recorder:", err);
+          }
+        }, 5000);
+      } catch (err) {
+        logError("Error starting calibration recorder:", err);
+      }
+    }
+    
     return { micOk, speakerOk, speakerDevice: device };
   });
 

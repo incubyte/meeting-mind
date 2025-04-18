@@ -19,23 +19,25 @@ Meeting Mind is an Electron application that captures and transcribes audio from
 - Both recorders use high-quality settings (16-bit, 44.1kHz WAV format)
 - Raw audio streams are continuously written to disk files to preserve all audio data
 
-### 2. Chunk Processing Engine
+### 2. Voice Activity Detection (VAD) Engine
 
-- Audio is processed in configurable chunks (7 seconds)
-- For each chunk processing cycle:
-  1. Microphone and speaker recordings are copied from continuous streams
-  2. Each audio chunk is analyzed for silence/speech detection
-  3. Chunks with actual speech are sent for transcription
-  4. Silent chunks are skipped to avoid unnecessary API calls
+- Audio is processed in real-time as it's captured
+- Uses an intelligent speech detection algorithm to:
+  1. Identify when a speaker starts talking
+  2. Capture the entire utterance until they stop
+  3. Process complete, natural speech segments
+  4. Send only speech-containing utterances for transcription
 
 ### 3. Speech Detection System
 
-- Implemented with a custom algorithm that:
-  - Analyzes WAV file structure (skipping 44-byte header)
-  - Samples audio data throughout the file (100 sample points)
-  - Compares sample amplitudes against a configurable threshold (1000)
-  - Classifies audio as silence or speech based on maximum amplitude
-- Debug copies of audio files are saved with "HAS-SPEECH" or "SILENCE" prefixes
+- Uses a sophisticated real-time voice activity detection (VAD) algorithm:
+  - Monitors audio amplitude levels continuously
+  - Uses hysteresis thresholds to avoid jitter (1200 for activation, 800 for deactivation)
+  - Implements silence duration timing (1.5 seconds of silence to end utterance)
+  - Handles natural pauses during speech
+  - Enforces minimum and maximum utterance durations (0.5-15 seconds)
+- Generates complete utterance WAV files ready for transcription
+- Debug copies of utterance files are saved with timestamp and source information
 
 ### 4. Transcription Pipeline
 
@@ -86,20 +88,20 @@ Meeting Mind is an Electron application that captures and transcribes audio from
 2. **Recording Process**:
    - User clicks "Start Recording"
    - Two recorder instances start simultaneously
-   - Continuous audio streams are written to disk
-   - Chunk processing timer starts (every 7 seconds)
+   - Voice Activity Detection (VAD) processing is attached to audio streams
+   - Continuous audio streams are written to disk for debugging
 
-3. **Chunk Processing Cycle**:
-   - Latest continuous recordings are copied for processing
-   - Speech detection analyzes copied files
-   - Files with speech are sent for transcription
-   - Silent files are skipped
+3. **Real-time Speech Processing**:
+   - Audio streams are continuously monitored for speech
+   - When speech begins, a new utterance is started
+   - Utterance continues until speech ends (1.5s of silence)
+   - Complete utterances are saved as individual WAV files
 
 4. **Transcription Flow**:
-   - Speech audio is sent to OpenAI Whisper API
-   - Received transcriptions are processed and timestamped
-   - Transcript buffer is updated with new entries
-   - UI is notified to refresh transcript display
+   - Complete utterance files are sent to OpenAI Whisper API
+   - Whisper API transcribes natural speech segments accurately
+   - Transcribed utterances include proper sentences with punctuation
+   - Transcript buffer is updated with semantically complete entries
 
 5. **UI Updates**:
    - Transcript component updates with new messages
@@ -111,15 +113,20 @@ Meeting Mind is an Electron application that captures and transcribes audio from
    - Recorders are properly stopped on application close
    - Debug directories preserved for analysis
 
-## Silent Audio Optimization
+## Voice Activity Detection Optimization
 
-A key optimization is the speech detection system that prevents sending silent audio to the OpenAI API:
+A key innovation is the real-time Voice Activity Detection (VAD) system that:
 
-1. Files with less than 44 bytes (just WAV header) are immediately rejected
-2. Small files (< 100 samples) are marked as silence
-3. Files are sampled at 100 points to find maximum amplitude
-4. If no sample exceeds threshold (1000), file is considered silence
-5. Only files with detected speech are sent to API, saving resources
+1. Processes audio in real-time as it arrives from the recorder
+2. Uses amplitude-based speech detection with hysteresis
+3. Properly identifies natural utterances with their start and end points
+4. Groups continuous speech into single transcription units
+5. Manages silence periods between phrases
+6. Only sends complete utterances to OpenAI API, dramatically improving:
+   - Accuracy of transcription (complete thoughts vs. arbitrary chunks)
+   - Cost efficiency (no silent periods sent to API)
+   - Natural conversation flow (aligned with actual speech patterns)
+   - Transcript quality (proper sentence boundaries)
 
 ## Debugging Features
 

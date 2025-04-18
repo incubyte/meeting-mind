@@ -33,7 +33,7 @@ button:disabled {
 }
 
 .level-meter-bar {
-  @apply h-full transition-all duration-100 ease-in-out;
+  @apply h-full transition-all duration-75 ease-in-out;
 }
 
 .mic-meter .level-meter-bar {
@@ -42,6 +42,12 @@ button:disabled {
 
 .speaker-meter .level-meter-bar {
   @apply bg-blue-500;
+}
+
+/* Threshold line in audio meters */
+.threshold-line {
+  @apply w-0.5 bg-red-500 opacity-70 z-10;
+  border-right: 1px dashed rgba(220, 38, 38, 0.8);
 }
 
 /* Removed download-btn class as it's now using the standard button styling */

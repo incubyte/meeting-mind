@@ -4,10 +4,10 @@
   "version": "1.0.0",
   "main": "src/main.js",
   "scripts": {
-    "start": "electron .",
+    "start": "npx tailwindcss -i ./src/style.css -o ./src/output.css && electron .",
     "tailwind:watch": "npx tailwindcss -i ./src/style.css -o ./src/output.css --watch",
     "tailwind:build": "npx tailwindcss -i ./src/style.css -o ./src/output.css",
-    "dev": "concurrently \"npm run tailwind:watch\" \"npm run start\""
+    "dev": "concurrently \"npm run tailwind:watch\" \"electron .\""
   },
   "keywords": [],
   "author": "",

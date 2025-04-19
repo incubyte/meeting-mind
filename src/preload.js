@@ -14,6 +14,15 @@ contextBridge.exposeInMainWorld("electronAPI", {
   requestAnalysis: () => ipcRenderer.invoke("analysis:request"),
   requestInsights: () => ipcRenderer.invoke("insights:request"),
 
+  // Settings and call type management
+  openSettings: () => ipcRenderer.invoke("settings:open"),
+  navigateToMain: () => ipcRenderer.invoke("settings:close"),
+  getCallTypes: () => ipcRenderer.invoke("callTypes:getAll"),
+  getCallType: (id) => ipcRenderer.invoke("callTypes:get", id),
+  addCallType: (callType) => ipcRenderer.invoke("callTypes:add", callType),
+  updateCallType: (id, updates) => ipcRenderer.invoke("callTypes:update", id, updates),
+  deleteCallType: (id) => ipcRenderer.invoke("callTypes:delete", id),
+
   // Main to Renderer (Send/On pattern for updates)
   onTranscriptUpdate: (callback) =>
     ipcRenderer.on("transcript:update", (_event, value) => callback(value)),
@@ -25,6 +34,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.on("analysis:update", (_event, value) => callback(value)),
   onInsightsUpdate: (callback) =>
     ipcRenderer.on("insights:update", (_event, value) => callback(value)),
+  onCallTypesUpdated: (callback) =>
+    ipcRenderer.on("callTypes:updated", (_event) => callback()),
 
   // Clean up listeners when the window is unloaded
   removeAllListeners: (channel) => ipcRenderer.removeAllListeners(channel),

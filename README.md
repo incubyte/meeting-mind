@@ -66,7 +66,7 @@ Meeting Mind is an Electron-based desktop application designed to enhance interv
 
 5. **Review Analysis**: Check the "Analysis & Suggestions" panel for recommended follow-up questions and observations.
 
-6. **View Insights**: The "Interview Insights" panel shows structured Q&A evaluations of the conversation.
+6. **View Insights**: The "Insights" panel shows structured Q&A evaluations of the conversation.
 
 7. **Stop Recording**: Click "Stop" when the interview is complete.
 

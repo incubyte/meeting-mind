@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.quilljs.com; style-src 'self' 'unsafe-inline' https://cdn.quilljs.com; font-src 'self' https://cdn.quilljs.com;" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Settings - Meeting Mind</title>
+  <link rel="stylesheet" href="output.css" />
+</head>
+<body class="flex flex-col min-h-screen bg-gray-100 p-4">
+  <header class="py-3 border-b bg-white shadow-sm mb-4">
+    <div class="container mx-auto px-4 flex justify-between items-center">
+      <h1 class="text-xl font-bold text-blue-600">Meeting Mind Settings</h1>
+      <button id="backBtn" class="bg-blue-500 hover:bg-blue-600 text-white text-sm py-1 px-3 rounded shadow-sm">
+        Back to App
+      </button>
+    </div>
+  </header>
+
+  <main class="container mx-auto md:p-6 flex-grow flex flex-col gap-6 mb-4">
+    <!-- Settings Tabs -->
+    <div class="bg-white shadow rounded-lg p-4 md:p-6">
+      <!-- <div class="flex border-b mb-6 pb-2">
+        <button class="tab-btn active py-2 px-4 border-b-2 border-blue-500 text-blue-600 font-medium" data-tab="call-types">
+          Call Types
+        </button>
+      </div> -->
+
+      <!-- Call Types Tab -->
+      <div id="call-types-tab" class="tab-content active">
+        <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6">
+          <div>
+            <h2 class="text-lg font-semibold text-gray-800">Manage Call Types</h2>
+            <p class="text-sm text-gray-600 mt-1">Create and manage different types of calls with custom descriptions.</p>
+          </div>
+          <button id="addCallTypeBtn" class="bg-green-500 hover:bg-green-600 text-white font-medium text-sm py-1.5 px-3 rounded shadow-sm whitespace-nowrap">
+            Add New Call Type
+          </button>
+        </div>
+
+        <!-- Call types list -->
+        <div id="callTypesList" class="mb-4 space-y-3">
+          <!-- Call types will be inserted here -->
+          <div class="text-gray-500 text-center py-6 bg-gray-50 rounded-lg border border-gray-200">
+            <p>Loading call types...</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- Add/Edit Call Type Modal -->
+  <div id="callTypeModal" class="fixed inset-0 bg-black bg-opacity-50 hidden flex items-center justify-center z-50">
+    <div class="bg-white rounded-lg shadow-xl p-5 w-full max-w-2xl mx-4 max-h-[90vh] overflow-auto">
+      <div class="flex justify-between items-center mb-4 pb-2 border-b">
+        <h3 id="modalTitle" class="text-lg font-semibold text-blue-600">Add New Call Type</h3>
+        <button id="closeModalBtn" type="button" class="text-gray-500 hover:text-gray-700 bg-gray-100 hover:bg-gray-200 rounded p-2 text-xs">
+          Close
+        </button>
+      </div>
+
+      <form id="callTypeForm">
+        <input type="hidden" id="callTypeId" value="">
+
+        <div class="mb-4">
+          <label for="callTypeName" class="block mb-1.5 text-sm font-medium text-gray-700">Call Type Name:</label>
+          <input type="text" id="callTypeName" class="w-full border border-gray-300 rounded-md p-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            placeholder="e.g. Technical Interview, Sales Call, 1:1 Meeting" required>
+        </div>
+
+        <div class="mb-4">
+          <label for="callTypeDescription" class="block mb-1.5 text-sm font-medium text-gray-700">Description (Rich Text):</label>
+          <p class="text-xs text-gray-500 mb-1.5">Add details, guidelines, or template questions for this call type.</p>
+          <div id="descriptionEditor" class="border border-gray-300 rounded-md bg-white min-h-[200px] focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+            <!-- Rich text editor will be initialized here -->
+          </div>
+        </div>
+
+        <div class="flex justify-end gap-3 mt-5 pt-3 border-t">
+          <button type="submit" id="saveCallTypeBtn" class="bg-blue-500 hover:bg-blue-600 text-white font-medium text-sm py-1.5 px-3 rounded shadow-sm">
+            Save Call Type
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <footer class="border-t py-2 text-center text-xs text-gray-500 bg-white mt-auto">
+    Meeting Mind - Live Assistant
+  </footer>
+
+  <!-- Include the Quill rich text editor -->
+  <script src="https://cdn.quilljs.com/1.3.6/quill.min.js"></script>
+  <link href="https://cdn.quilljs.com/1.3.6/quill.snow.css" rel="stylesheet">
+
+  <script defer src="settings.js"></script>
+</body>
+</html>

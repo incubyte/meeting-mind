@@ -2,6 +2,7 @@ import { app, BrowserWindow, ipcMain, dialog } from "electron";
 import * as path from "node:path";
 import * as fs from "node:fs";
 import * as os from "node:os";
+import settingsManager from "./utils/settingsManager.js";
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
 import AudioRecorder from "node-audiorecorder";
@@ -53,39 +54,39 @@ const MAX_TRANSCRIPT_ENTRIES = 100;            // Maximum number of transcript e
 /**
  * Process audio frames for Voice Activity Detection (VAD)
  * This is the core function for utterance detection
- * 
+ *
  * @param {Buffer} audioBuffer - Raw audio data buffer
  * @param {string} source - Audio source ('mic' or 'speaker')
  */
 function processAudioForVAD(audioBuffer, source) {
   const state = vadState[source];
   const now = Date.now();
-  
+
   // Extract audio samples (assuming 16-bit PCM audio)
   const samples = extractSamplesFromBuffer(audioBuffer);
-  
+
   // Calculate amplitude (speech level)
   const amplitude = calculateAmplitude(samples);
   state.lastAmplitude = amplitude;
-  
+
   // Enhanced level logging for debugging
   // For mic, log more frequently to better understand the amplitude
   if (source === 'mic' && state.frameCount % 5 === 0) {
     const thresholdInfo = `threshold=${VAD_AMPLITUDE_THRESHOLD}/${VAD_SILENCE_THRESHOLD}`;
     logVerbose(`${source} VAD: amplitude=${amplitude.toFixed(2)}, active=${state.isActive}, silence=${state.isSilence}, ${thresholdInfo}`);
-    
+
     // Log to UI for better visibility - send every frame for real-time meter
     const levelStatus = amplitude > VAD_AMPLITUDE_THRESHOLD ? "SPEECH" : "quiet";
     mainWindow.webContents.send("status:update", `[MIC] Level: ${amplitude.toFixed(0)} (${levelStatus})`);
-  } 
+  }
   // For speaker, send level data at the same rate as mic
   else if (source === 'speaker' && state.frameCount % 5 === 0) {
     logVerbose(`${source} VAD: amplitude=${amplitude.toFixed(2)}, active=${state.isActive}, silence=${state.isSilence}`);
-    
+
     // Send speaker level to UI for visualization
     mainWindow.webContents.send("status:update", `[SPEAKER] Level: ${amplitude.toFixed(0)}`);
   }
-  
+
   // Safety check - if our buffer gets too large, we need to finalize and send it
   if (state.audioBuffers.length > VAD_BUFFER_LIMIT) {
     if (state.isActive) {
@@ -96,11 +97,11 @@ function processAudioForVAD(audioBuffer, source) {
       state.audioBuffers = [];
     }
   }
-  
+
   // Always store the frame (we'll keep a rolling buffer of recent audio)
   state.audioBuffers.push(audioBuffer);
   state.frameCount++;
-  
+
   // VAD state machine
   if (!state.isActive) {
     // Not in an active utterance - check if we should start one
@@ -110,28 +111,28 @@ function processAudioForVAD(audioBuffer, source) {
       state.isSilence = false;
       state.utteranceStart = now;
       state.silenceStart = null;
-      
+
       // Create a new output file for this utterance
       state.utteranceCount++;
       state.audioPath = path.join(
-        DEBUG_RECORDINGS_DIR, 
+        DEBUG_RECORDINGS_DIR,
         `vad-${source}-utterance-${state.utteranceCount}-${now}.wav`
       );
-      
+
       logInfo(`${source} VAD: Speech started (amplitude=${amplitude})`);
-      
+
       // Initialize the WAV file with an empty header - we'll fill it later
       initializeWavFile(state.audioPath, source === 'mic' ? 1 : 2);
     }
   } else {
     // In an active utterance
-    
+
     // Check for max duration (force split long utterances)
     const utteranceDuration = now - state.utteranceStart;
     if (utteranceDuration > VAD_MAX_UTTERANCE_MS) {
       logInfo(`${source} VAD: Maximum utterance duration reached (${utteranceDuration}ms)`);
       finalizeUtterance(source, "max-duration");
-      
+
       // Start a new utterance immediately if still speaking
       if (amplitude > VAD_AMPLITUDE_THRESHOLD) {
         state.isActive = true;
@@ -139,19 +140,19 @@ function processAudioForVAD(audioBuffer, source) {
         state.utteranceStart = now;
         state.utteranceCount++;
         state.audioPath = path.join(
-          DEBUG_RECORDINGS_DIR, 
+          DEBUG_RECORDINGS_DIR,
           `vad-${source}-utterance-${state.utteranceCount}-${now}.wav`
         );
         initializeWavFile(state.audioPath, source === 'mic' ? 1 : 2);
       }
       return;
     }
-    
+
     // Update the utterance file with the new audio data
     if (state.audioPath) {
       appendToWavFile(state.audioPath, audioBuffer);
     }
-    
+
     // Detect silence (using hysteresis - lower threshold for detecting silence)
     if (amplitude < VAD_SILENCE_THRESHOLD) {
       if (!state.isSilence) {
@@ -182,14 +183,14 @@ function processAudioForVAD(audioBuffer, source) {
 
 /**
  * Finalize an utterance, process it, and reset state
- * 
+ *
  * @param {string} source - Audio source ('mic' or 'speaker')
  * @param {string} reason - Why the utterance was finalized
  */
 function finalizeUtterance(source, reason) {
   const state = vadState[source];
   const now = Date.now();
-  
+
   if (!state.isActive || !state.utteranceStart) {
     // Not in an active utterance - nothing to do
     state.isActive = false;
@@ -197,22 +198,22 @@ function finalizeUtterance(source, reason) {
     state.audioBuffers = [];
     return;
   }
-  
+
   const utteranceDuration = now - state.utteranceStart;
-  
+
   // Only process if the utterance is long enough
   if (utteranceDuration >= VAD_MIN_UTTERANCE_MS) {
     logInfo(`${source} VAD: Processing utterance of ${utteranceDuration}ms (reason: ${reason})`);
-    
+
     // Complete the WAV file
     finalizeWavFile(state.audioPath);
-    
+
     // Send the utterance for transcription
     if (fs.existsSync(state.audioPath)) {
       // Send to transcription API - using source mapping (mic → "You", speaker → "Other")
       const transcriptSource = source === 'mic' ? 'You' : 'Other';
       transcribeAudioChunk(state.audioPath, transcriptSource);
-      
+
       // If this is a candidate utterance (speaker), check if we should auto-trigger analysis
       if (source === 'speaker') {
         // We'll do this after a short delay to allow transcription to complete
@@ -230,7 +231,7 @@ function finalizeUtterance(source, reason) {
       fs.unlinkSync(state.audioPath);
     }
   }
-  
+
   // Reset state
   state.isActive = false;
   state.isSilence = true;
@@ -242,7 +243,7 @@ function finalizeUtterance(source, reason) {
 
 /**
  * Extract samples from a raw audio buffer
- * 
+ *
  * @param {Buffer} buffer - Raw audio data
  * @returns {Int16Array} - Array of audio samples
  */
@@ -253,7 +254,7 @@ function extractSamplesFromBuffer(buffer) {
 
 /**
  * Calculate the amplitude (energy level) of audio samples
- * 
+ *
  * @param {Int16Array} samples - Audio samples
  * @returns {number} - Amplitude value
  */
@@ -262,22 +263,22 @@ function calculateAmplitude(samples) {
   const step = Math.max(1, Math.floor(samples.length / 100));
   let sum = 0;
   let count = 0;
-  
+
   // Calculate RMS (root mean square) of the samples
   for (let i = 0; i < samples.length; i += step) {
     sum += samples[i] * samples[i];
     count++;
   }
-  
+
   if (count === 0) return 0;
-  
+
   // Return RMS amplitude
   return Math.sqrt(sum / count);
 }
 
 /**
  * Initialize a WAV file with a proper header
- * 
+ *
  * @param {string} filePath - Path to the WAV file
  * @param {number} channels - Number of audio channels (1=mono, 2=stereo)
  */
@@ -288,35 +289,35 @@ function initializeWavFile(filePath, channels) {
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true });
     }
-    
+
     // Create a WAV header
     const headerBuffer = Buffer.alloc(44); // WAV header is 44 bytes
-    
+
     // RIFF chunk descriptor
     headerBuffer.write('RIFF', 0);
     headerBuffer.writeUInt32LE(0, 4); // File size - 8 (placeholder, will update later)
     headerBuffer.write('WAVE', 8);
-    
+
     // fmt sub-chunk
     headerBuffer.write('fmt ', 12);
     headerBuffer.writeUInt32LE(16, 16); // Sub-chunk size (16 for PCM)
     headerBuffer.writeUInt16LE(1, 20); // Audio format (1 for PCM)
     headerBuffer.writeUInt16LE(channels, 22); // Number of channels
     headerBuffer.writeUInt32LE(VAD_SAMPLE_RATE, 24); // Sample rate
-    
+
     // Calculate bytes per sample and other header fields
     const bytesPerSample = 2; // 16-bit = 2 bytes
     const blockAlign = channels * bytesPerSample;
     const byteRate = VAD_SAMPLE_RATE * blockAlign;
-    
+
     headerBuffer.writeUInt32LE(byteRate, 28); // Byte rate
     headerBuffer.writeUInt16LE(blockAlign, 32); // Block align
     headerBuffer.writeUInt16LE(bytesPerSample * 8, 34); // Bits per sample
-    
+
     // data sub-chunk
     headerBuffer.write('data', 36);
     headerBuffer.writeUInt32LE(0, 40); // Data size (placeholder, will update later)
-    
+
     // Write the header to the file
     fs.writeFileSync(filePath, headerBuffer);
     logVerbose(`Initialized WAV file: ${filePath}`);
@@ -327,7 +328,7 @@ function initializeWavFile(filePath, channels) {
 
 /**
  * Append audio data to an existing WAV file
- * 
+ *
  * @param {string} filePath - Path to the WAV file
  * @param {Buffer} audioBuffer - Audio data to append
  */
@@ -342,7 +343,7 @@ function appendToWavFile(filePath, audioBuffer) {
 
 /**
  * Finalize a WAV file by updating the header with the correct file size
- * 
+ *
  * @param {string} filePath - Path to the WAV file
  */
 function finalizeWavFile(filePath) {
@@ -350,22 +351,22 @@ function finalizeWavFile(filePath) {
     // Get the file size
     const stats = fs.statSync(filePath);
     const fileSize = stats.size;
-    
+
     // Update the file size in the header
     const headerBuffer = Buffer.alloc(8);
-    
+
     // RIFF chunk size (file size - 8)
     headerBuffer.writeUInt32LE(fileSize - 8, 0);
-    
+
     // data chunk size (file size - 44)
     headerBuffer.writeUInt32LE(fileSize - 44, 4);
-    
+
     // Open the file and update the header fields
     const fd = fs.openSync(filePath, 'r+');
     fs.writeSync(fd, headerBuffer.slice(0, 4), 0, 4, 4); // Update RIFF chunk size
     fs.writeSync(fd, headerBuffer.slice(4, 8), 0, 4, 40); // Update data chunk size
     fs.closeSync(fd);
-    
+
     logVerbose(`Finalized WAV file: ${filePath} (size=${fileSize} bytes)`);
   } catch (err) {
     logError(`Failed to finalize WAV file: ${err.message}`);
@@ -381,60 +382,60 @@ function checkForSpeechInAudio(filePath) {
   try {
     // Read the WAV file
     const fileBuffer = fs.readFileSync(filePath);
-    
+
     // WAV file structure:
     // - 44 bytes header
     // - Then the actual PCM audio data
-    
+
     // Skip the header to get to the audio data
     const audioData = fileBuffer.slice(44);
-    
+
     // For 16-bit audio (which we're using), each sample is 2 bytes
-    const bytesPerSample = 2; 
-    
+    const bytesPerSample = 2;
+
     // The number of samples in the file
     const sampleCount = Math.floor(audioData.length / bytesPerSample);
-    
+
     // Don't process if the file is too small
     if (sampleCount < 100) {
       logWarn(`Audio file too small for speech detection: ${filePath}`);
       return false;
     }
-    
+
     // We'll check a subset of samples throughout the file
     const samplesPerCheck = Math.floor(sampleCount / SAMPLES_TO_CHECK);
-    
+
     // Track if we found any sound above the threshold
     let foundSound = false;
     let maxValue = 0;
-    
+
     // Check samples throughout the file
     for (let i = 0; i < SAMPLES_TO_CHECK; i++) {
       // Calculate the position to check
       const sampleIndex = i * samplesPerCheck;
       const bufferPos = sampleIndex * bytesPerSample;
-      
+
       // Skip if we're at the end of the file
       if (bufferPos >= audioData.length - 1) continue;
-      
+
       // Read a 16-bit sample (little endian)
       const sampleValue = audioData.readInt16LE(bufferPos);
-      
+
       // Take the absolute value (since audio waveforms go negative)
       const absValue = Math.abs(sampleValue);
-      
+
       // Keep track of max value for logging
       maxValue = Math.max(maxValue, absValue);
-      
+
       // Check if this sample is above our threshold
       if (absValue > SILENCE_THRESHOLD) {
         foundSound = true;
         break; // We found sound, no need to check more
       }
     }
-    
+
     logVerbose(`Audio check for ${path.basename(filePath)}: max value = ${maxValue}, threshold = ${SILENCE_THRESHOLD}, contains speech = ${foundSound}`);
-    
+
     // If we're debugging, save a copy of the file with the result in the filename
     if (DEBUG_SAVE_RECORDINGS) {
       const debugFileCopy = path.join(
@@ -448,7 +449,7 @@ function checkForSpeechInAudio(filePath) {
         logWarn(`Failed to save silence-checked audio copy: ${err.message}`);
       }
     }
-    
+
     return foundSound;
   } catch (err) {
     // If anything goes wrong, log the error and assume there's no speech (safer approach)
@@ -458,6 +459,7 @@ function checkForSpeechInAudio(filePath) {
 }
 
 let mainWindow;
+let settingsWindow = null;
 let micRecorder = null;
 let speakerRecorder = null;
 let micFileStream = null;
@@ -465,6 +467,7 @@ let speakerFileStream = null;
 let speakerLoopbackDevice = null;
 let isRecording = false;
 let recordingInterval = null;
+let currentCallType = null; // Selected call type for context
 
 // Voice Activity Detection (VAD) state tracking
 let vadState = {
@@ -517,30 +520,30 @@ let insightsPending = false; // Whether insights generation is in progress
 function calculateTextSimilarity(text1, text2) {
   // If either string is empty, they're completely different
   if (!text1 || !text2) return 0;
-  
+
   // Normalize both texts - lowercase and trim
   const a = text1.toLowerCase().trim();
   const b = text2.toLowerCase().trim();
-  
+
   // Check for exact match only
   if (a === b) return 1;
-  
+
   // Remove the containment check as it's causing too many false positives
   // For longer texts, we check for more precise similarity
-  
+
   // Simple word overlap similarity for performance
   const setA = new Set(a.split(/\s+/));
   const setB = new Set(b.split(/\s+/));
-  
+
   // Word count check - very different length texts are likely different
   if (Math.abs(setA.size - setB.size) > 3) return 0.3;
-  
+
   // Count common words
   let intersection = 0;
   for (const word of setA) {
     if (setB.has(word)) intersection++;
   }
-  
+
   // Calculate Jaccard similarity
   const union = setA.size + setB.size - intersection;
   return union === 0 ? 0 : intersection / union;
@@ -561,33 +564,33 @@ function findLatestTranscriptFromSource(source) {
 /**
  * Check if a transcript should be ignored (too similar to existing text)
  * or merged with an existing message
- * 
+ *
  * @returns {object} Decision with action type and message
  */
 function processTranscript(newText, source) {
   // Find the latest message from this source
   const latestMessage = findLatestTranscriptFromSource(source);
-  
+
   if (!latestMessage) {
     return { action: 'create', message: 'First message from this source' };
   }
-  
+
   // Check if this is similar to the previous message from this source
   const similarity = calculateTextSimilarity(latestMessage.text, newText);
-  
+
   // If too similar, ignore to avoid duplicates
   if (similarity > TRANSCRIPT_SIMILARITY_THRESHOLD) {
     return { action: 'ignore', message: `Duplicate detected (${similarity.toFixed(2)})` };
   }
-  
+
   // Check if we should continue the previous message (same speaker within time window)
   const now = new Date();
   const timeSinceLastUpdate = now - new Date(latestMessage.lastUpdated);
-  
+
   if (timeSinceLastUpdate <= TRANSCRIPT_CONTINUATION_WINDOW) {
     return { action: 'append', message: `Continuing message (${timeSinceLastUpdate}ms gap)` };
   }
-  
+
   // Default to creating a new message
   return { action: 'create', message: 'New message' };
 }
@@ -619,25 +622,25 @@ function createOpenRouterClient() {
 function buildSystemPrompt() {
   // Start with base system instructions
   let systemPrompt = `
-You are an expert interview assistant helping an interviewer conduct an effective interview. 
-Your role is to analyze the ongoing conversation between the interviewer and candidate in real-time.
+You are an expert assistant helping someone conduct an effective conversation or interview.
+Your role is to analyze the ongoing conversation in real-time.
 
 When generating content for the "Analysis & Suggestions" panel:
 Provide brief, scannable analysis with exactly these three sections in this order:
-1. FOLLOWUP QUESTIONS: 2-3 specific questions the interviewer should ask next
-2. OBSERVATIONS: 1-2 brief insights about technical accuracy and communication skills
-3. SUGGESTIONS: 1-2 tactical tips for interviewer to improve the process
+1. FOLLOWUP QUESTIONS: 2-3 specific questions to ask next based on the conversation context
+2. OBSERVATIONS: 1-2 brief insights about technical accuracy and communication quality
+3. SUGGESTIONS: 1-2 tactical tips to improve the conversation
 
 Use very concise bullet points. Keep the entire response under 10 lines total.
 
-When generating content for the "Interview Insights" panel:
+When generating content for the "Insights" panel:
 You must thoroughly analyze the transcript to identify ALL questions and answers, even if they're implicit or brief.
 
 For each question-answer exchange:
-1. Identify the interviewer's question (even brief ones or follow-ups) and format as: "Q: <interviewer's question>"
-2. Evaluate the candidate's answer with this format:
+1. Identify the question (even brief ones or follow-ups) and format as: "Q: <question>"
+2. Evaluate the answer with this format:
    "ANSWER REVIEW: <assessment of technical accuracy and completeness>"
-   "CANDIDATE RESPONSE: <concise summary of response>"
+   "RESPONSE: <concise summary of response>"
 
 IMPORTANT GUIDELINES:
 - Detect ALL questions in the conversation, including brief follow-ups
@@ -646,6 +649,11 @@ IMPORTANT GUIDELINES:
 - Do not skip any questions - identify and evaluate every Q&A pair
 - Only provide insights when you can identify clear Q&A exchanges - if none exist yet, state "Waiting for complete Q&A exchanges to provide insights."
 `;
+
+  // Add call type context if available
+  if (interviewContext.callTypeContext) {
+    systemPrompt += `\n\nCALL TYPE INFORMATION:\n${interviewContext.callTypeContext}\n`;
+  }
 
   // Add job description if available
   if (interviewContext.jobDescription) {
@@ -662,12 +670,12 @@ IMPORTANT GUIDELINES:
     systemPrompt += `\n\nADDITIONAL CONTEXT:\n${interviewContext.additionalContext}\n`;
   }
 
-  // Add interview best practices
-  systemPrompt += `\n\nKEY REMINDERS FOR GOOD INTERVIEWING:
+  // Add conversation best practices
+  systemPrompt += `\n\nKEY REMINDERS:
 - Remain objective and avoid biases
-- Focus on relevant skills and experience
-- Listen actively and ask clarifying questions
-- Give the candidate enough time to respond fully
+- Focus on relevant topics based on the conversation context
+- Listen actively and suggest clarifying questions
+- Give the other person enough time to respond fully
 - Stay within legal and ethical guidelines`;
 
   return systemPrompt;
@@ -692,10 +700,10 @@ function formatTranscriptForLLM(transcriptItems, purpose = 'analysis') {
     const speaker = item.source === "You" ? "Interviewer" : "Candidate";
     return `${speaker}: ${item.text}`;
   }).join("\n\n");
-  
+
   // For insights format, provide improved instructions for Q&A detection
   if (purpose === 'insights') {
-    formattedTranscript = `Please analyze the following transcript and identify all interview questions and answers. 
+    formattedTranscript = `Please analyze the following transcript and identify all interview questions and answers.
 
 IMPORTANT INSTRUCTIONS:
 1. Identify ALL questions asked by the Interviewer, even brief or follow-up questions
@@ -811,7 +819,7 @@ async function generateInterviewInsights(forceTrigger = false) {
   lastInsightsTime = now;
 
   try {
-    logInfo("Generating interview Q&A insights...");
+    logInfo("Generating Q&A insights...");
     const openRouterClient = createOpenRouterClient();
     const systemPrompt = buildSystemPrompt();
     const formattedTranscript = formatTranscriptForLLM(transcriptBuffer, 'insights');
@@ -879,7 +887,7 @@ function checkAutoTriggerAnalysis(source) {
         mainWindow.webContents.send("analysis:update", result);
       }
     });
-    
+
     // Also generate insights after a short delay
     setTimeout(() => {
       if (!insightsPending) {
@@ -915,10 +923,10 @@ async function handleTextFileUpload(filePath) {
  */
 function updateInterviewContext(context) {
   interviewContext = { ...interviewContext, ...context };
-  
+
   // Regenerate the system prompt with the new context
   interviewContext.systemPrompt = buildSystemPrompt();
-  
+
   return interviewContext;
 }
 
@@ -989,7 +997,7 @@ async function getDefaultPulseAudioMonitorDevice() {
 // --- Transcription Function ---
 async function transcribeAudioChunk(filePath, source) {
   logVerbose(`Transcribing ${source} chunk: ${path.basename(filePath)}`);
-  
+
   // Verify file exists and has content
   try {
     // Verify the file exists and is readable
@@ -997,40 +1005,40 @@ async function transcribeAudioChunk(filePath, source) {
       logError(`Cannot transcribe non-existent file: ${filePath}`);
       return;
     }
-    
+
     const stats = fs.statSync(filePath);
     if (stats.size <= 44) { // WAV header is at least 44 bytes
       logWarn(`File too small to contain audio data: ${filePath} (${stats.size} bytes)`);
       return;
     }
-    
+
     // Read the entire file into a buffer first to avoid streaming issues
     const audioBuffer = fs.readFileSync(filePath);
     logVerbose(`Read ${audioBuffer.length} bytes from ${filePath}`);
-    
+
     // Write to a temp file with a consistent name (helps with debugging)
     const tempFilePath = path.join(TEMP_AUDIO_DIR, `${source.toLowerCase()}-upload.wav`);
     fs.writeFileSync(tempFilePath, audioBuffer);
-    
+
     // Save a debug copy of exactly what we're sending to OpenAI
     if (DEBUG_SAVE_RECORDINGS) {
       const openaiSubmitFile = path.join(
-        DEBUG_RECORDINGS_DIR, 
+        DEBUG_RECORDINGS_DIR,
         `openai-submit-${source.toLowerCase()}-${Date.now()}.wav`
       );
       fs.copyFileSync(tempFilePath, openaiSubmitFile);
       logVerbose(`Saved exact OpenAI submission file to: ${openaiSubmitFile}`);
-      
+
       // Log file properties
       const stats = fs.statSync(openaiSubmitFile);
       const channelCount = source === "You" ? 1 : 2;
       const durationSeconds = stats.size / (16000 * 2 * channelCount); // Approx duration in seconds
       logVerbose(`OpenAI submission file properties: Size=${stats.size} bytes, ~${durationSeconds.toFixed(2)} seconds duration`);
     }
-    
+
     // Process with OpenAI using a fresh file stream from our copy
     logVerbose(`Sending ${source} audio to OpenAI Whisper API (${path.basename(filePath)})`);
-    
+
     const startTime = Date.now();
     const transcriptionPromise = openai.audio.transcriptions.create({
       file: fs.createReadStream(tempFilePath),
@@ -1041,27 +1049,27 @@ async function transcribeAudioChunk(filePath, source) {
       logVerbose(`OpenAI Whisper API responded in ${endTime - startTime}ms for ${source}`);
       return result;
     });
-    
+
     // No stream error promise needed as we're using readFileSync
     const streamError = new Promise((_, reject) => {
       // Only reject if API call takes too long
       setTimeout(() => reject(new Error("Transcription timed out")), 30000);
     });
-    
+
     // Race the promises to catch stream errors
     const transcription = await Promise.race([transcriptionPromise, streamError]);
 
     logVerbose(`Transcription result for ${source}:`, transcription.text);
-    
+
     // Debug: Save transcription results to file
     if (DEBUG_SAVE_RECORDINGS) {
       try {
         const debugResultFile = path.join(
-          DEBUG_RECORDINGS_DIR, 
+          DEBUG_RECORDINGS_DIR,
           `debug-transcription-${source.toLowerCase()}-${Date.now()}.json`
         );
         fs.writeFileSync(
-          debugResultFile, 
+          debugResultFile,
           JSON.stringify({
             source: source,
             timestamp: new Date().toISOString(),
@@ -1078,13 +1086,13 @@ async function transcribeAudioChunk(filePath, source) {
 
     if (transcription.text && transcription.text.trim()) {
       const text = transcription.text.trim();
-      
+
       // Process the transcript to determine if we should add, append, or ignore
       const decision = processTranscript(text, source);
       logVerbose(`Transcript decision for "${text}": ${decision.action} - ${decision.message}`);
-      
+
       const now = new Date();
-      
+
       if (decision.action === 'ignore') {
         // Skip this transcription as it's likely a duplicate
         logVerbose(`Ignoring duplicate transcription: "${text}"`);
@@ -1092,19 +1100,19 @@ async function transcribeAudioChunk(filePath, source) {
       else if (decision.action === 'append') {
         // Append to the existing message from this source
         const latestMessage = findLatestTranscriptFromSource(source);
-        
+
         // Only append if the new text adds information
         if (text.length > latestMessage.text.length || !latestMessage.text.includes(text)) {
           logVerbose(`Appending to existing ${source} message: "${latestMessage.text}" + "${text}"`);
-          
+
           // Decide how to join the texts (with space or newline)
           const lastChar = latestMessage.text.slice(-1);
           const joinChar = (lastChar === '.' || lastChar === '?' || lastChar === '!') ? ' ' : ' ';
-          
+
           // Update the message
           latestMessage.text = latestMessage.text + joinChar + text;
           latestMessage.lastUpdated = now;
-          
+
           // Note: No need to sort since we're updating in place
         } else {
           logVerbose(`New text "${text}" doesn't add information to "${latestMessage.text}"`);
@@ -1120,16 +1128,16 @@ async function transcribeAudioChunk(filePath, source) {
           source: source,
           text: text,
         });
-        
+
         // Sort buffer chronologically
         transcriptBuffer.sort((a, b) => a.timestamp - b.timestamp);
-        
+
         // Limit transcript buffer size
         if (transcriptBuffer.length > MAX_TRANSCRIPT_ENTRIES) {
           transcriptBuffer.shift(); // Remove oldest entry
         }
       }
-      
+
       // Send updated transcript to renderer
       mainWindow.webContents.send("transcript:update", transcriptBuffer);
     }
@@ -1155,7 +1163,7 @@ async function startRecording() {
     logWarn("Recording is already in progress.");
     return;
   }
-  
+
   logInfo("Attempting to start recording...");
   transcriptBuffer = []; // Clear previous transcript
   mainWindow.webContents.send("transcript:update", transcriptBuffer); // Clear UI
@@ -1237,7 +1245,7 @@ async function startRecording() {
     audioPath: null,
     utteranceCount: 0,
   };
-  
+
   vadState.speaker = {
     isActive: false,
     isSilence: true,
@@ -1264,13 +1272,13 @@ async function startRecording() {
   if (micStartSuccess) {
     logVerbose("Setting up microphone stream and event listeners...");
     const micStream = micRecorder.stream(); // Get stream reference AFTER starting
-    
+
     if (micStream) {
       // Handle errors and stream events
       micStream.on("error", (err) => {
         logError("Mic Recorder Stream Error:", err);
       });
-      
+
       micStream.on("close", (code) => {
         logWarn(`Mic recording process exited (Code: ${code})`);
         // Finalize any active utterance
@@ -1278,11 +1286,11 @@ async function startRecording() {
           finalizeUtterance('mic', 'stream-closed');
         }
       });
-      
+
       micStream.on("end", () => {
         logVerbose("Microphone recorder stream ended.");
       });
-      
+
       // Set up continuous file for debugging
       if (DEBUG_SAVE_RECORDINGS) {
         const debugMicFile = path.join(DEBUG_RECORDINGS_DIR, `continuous-mic-${Date.now()}.wav`);
@@ -1290,7 +1298,7 @@ async function startRecording() {
         micStream.pipe(debugMicStream);
         logInfo(`DEBUG: Writing continuous mic recording to ${debugMicFile}`);
       }
-      
+
       // Set up data handler for VAD processing
       micStream.on("data", (chunk) => {
         // Process audio chunk for Voice Activity Detection
@@ -1317,13 +1325,13 @@ async function startRecording() {
   if (speakerStartSuccess) {
     logVerbose("Setting up speaker stream and event listeners...");
     const speakerStream = speakerRecorder.stream(); // Get stream reference AFTER starting
-    
+
     if (speakerStream) {
       // Handle errors and stream events
       speakerStream.on("error", (err) => {
         logError("Speaker Recorder Stream Error:", err);
       });
-      
+
       speakerStream.on("close", (code) => {
         logWarn(`Speaker recording process exited (Code: ${code})`);
         // Finalize any active utterance
@@ -1331,11 +1339,11 @@ async function startRecording() {
           finalizeUtterance('speaker', 'stream-closed');
         }
       });
-      
+
       speakerStream.on("end", () => {
         logVerbose("Speaker recorder stream ended.");
       });
-      
+
       // Set up continuous file for debugging
       if (DEBUG_SAVE_RECORDINGS) {
         const debugSpeakerFile = path.join(DEBUG_RECORDINGS_DIR, `continuous-speaker-${Date.now()}.wav`);
@@ -1343,7 +1351,7 @@ async function startRecording() {
         speakerStream.pipe(debugSpeakerStream);
         logInfo(`DEBUG: Writing continuous speaker recording to ${debugSpeakerFile}`);
       }
-      
+
       // Set up data handler for VAD processing
       speakerStream.on("data", (chunk) => {
         // Process audio chunk for Voice Activity Detection
@@ -1354,7 +1362,7 @@ async function startRecording() {
       speakerStartSuccess = false;
     }
   }
-  
+
   // If neither recording started successfully, stop and return an error
   if (!micStartSuccess && !speakerStartSuccess) {
     stopRecording();
@@ -1365,7 +1373,7 @@ async function startRecording() {
   isRecording = true;
   logInfo(`Recording started. Using Voice Activity Detection (VAD) for speech processing.`);
   mainWindow.webContents.send("recording:status", { isRecording: true });
-  
+
   // We don't need the processing interval anymore since we're using VAD
   // But we'll keep a status update interval to provide some UI feedback
   recordingInterval = setInterval(() => {
@@ -1393,7 +1401,7 @@ function stopRecording() {
     logInfo("Finalizing active microphone utterance before stopping");
     finalizeUtterance('mic', 'recording-stopped');
   }
-  
+
   if (vadState.speaker.isActive) {
     logInfo("Finalizing active speaker utterance before stopping");
     finalizeUtterance('speaker', 'recording-stopped');
@@ -1441,7 +1449,7 @@ function stopRecording() {
     audioPath: null,
     utteranceCount: 0,
   };
-  
+
   vadState.speaker = {
     isActive: false,
     isSilence: true,
@@ -1465,13 +1473,21 @@ function stopRecording() {
 // --- Electron App Setup ---
 function createWindow() {
   mainWindow = new BrowserWindow({
-    width: 800,
-    height: 600,
+    width: 1024,
+    height: 768,
     webPreferences: {
       preload: path.join(import.meta.dirname, "preload.js"),
       contextIsolation: true, // Recommended for security
       nodeIntegration: false, // Recommended for security
     },
+    // Set default state to be maximized
+    show: false // Hide until ready-to-show event
+  });
+
+  // Once DOM is ready, show window maximized
+  mainWindow.once('ready-to-show', () => {
+    mainWindow.maximize();
+    mainWindow.show();
   });
 
   mainWindow.loadFile(path.join("src/index.html"));
@@ -1482,6 +1498,51 @@ function createWindow() {
   mainWindow.on("closed", () => {
     mainWindow = null;
     stopRecording(); // Ensure recording stops when window is closed
+
+    // Also close settings window if open
+    if (settingsWindow && !settingsWindow.isDestroyed()) {
+      settingsWindow.close();
+    }
+  });
+}
+
+/**
+ * Create and show settings window
+ */
+function createSettingsWindow() {
+  // If settings window already exists, just focus it
+  if (settingsWindow && !settingsWindow.isDestroyed()) {
+    settingsWindow.focus();
+    return;
+  }
+
+  // Create the settings window
+  settingsWindow = new BrowserWindow({
+    width: 1024,
+    height: 768,
+    parent: mainWindow,
+    modal: false,
+    webPreferences: {
+      preload: path.join(import.meta.dirname, "preload.js"),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+    show: false // Hide until ready-to-show event
+  });
+
+  // Once DOM is ready, show window maximized
+  settingsWindow.once('ready-to-show', () => {
+    settingsWindow.maximize();
+    settingsWindow.show();
+  });
+
+  settingsWindow.loadFile(path.join("src/settings.html"));
+
+  // Open DevTools for settings window during development
+  // settingsWindow.webContents.openDevTools();
+
+  settingsWindow.on("closed", () => {
+    settingsWindow = null;
   });
 }
 
@@ -1489,6 +1550,7 @@ app.whenReady().then(() => {
   logInfo("App ready, creating window...");
 
   // --- IPC Handlers ---
+  // Audio recording handlers
   ipcMain.handle("audio:start", async () => {
     logVerbose("Received 'audio:start' request from renderer.");
     await startRecording();
@@ -1500,11 +1562,112 @@ app.whenReady().then(() => {
     stopRecording();
     return { success: !isRecording };
   });
-  
+
+  // Settings window handlers
+  ipcMain.handle("settings:open", () => {
+    logVerbose("Received 'settings:open' request from renderer.");
+    createSettingsWindow();
+    return { success: true };
+  });
+
+  ipcMain.handle("settings:close", () => {
+    logVerbose("Received 'settings:close' request from renderer.");
+    if (settingsWindow && !settingsWindow.isDestroyed()) {
+      settingsWindow.close();
+    }
+    return { success: true };
+  });
+
+
+  // Call type management handlers
+  ipcMain.handle("callTypes:getAll", () => {
+    logVerbose("Received 'callTypes:getAll' request from renderer.");
+    return settingsManager.getCallTypes();
+  });
+
+  ipcMain.handle("callTypes:get", (event, id) => {
+    logVerbose(`Received 'callTypes:get' request for ID: ${id}`);
+    return settingsManager.getCallType(id);
+  });
+
+  ipcMain.handle("callTypes:add", (event, callType) => {
+    logVerbose(`Received 'callTypes:add' request: ${callType.name}`);
+    try {
+      const success = settingsManager.addCallType(callType);
+      logInfo(`Call type add result: ${success ? 'Success' : 'Failed'}`);
+      
+      if (success) {
+        // Notify main window that call types have been updated
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send("callTypes:updated");
+        }
+      }
+      
+      return { success };
+    } catch (error) {
+      logError(`Error adding call type: ${error.message}`);
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle("callTypes:update", (event, id, updates) => {
+    logVerbose(`Received 'callTypes:update' request for ID: ${id}`);
+    try {
+      const success = settingsManager.updateCallType(id, updates);
+      logInfo(`Call type update result for ${id}: ${success ? 'Success' : 'Failed'}`);
+      
+      if (success) {
+        // Notify main window that call types have been updated
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send("callTypes:updated");
+        }
+      }
+      
+      return { success };
+    } catch (error) {
+      logError(`Error updating call type: ${error.message}`);
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle("callTypes:delete", (event, id) => {
+    logVerbose(`Received 'callTypes:delete' request for ID: ${id}`);
+    try {
+      const success = settingsManager.deleteCallType(id);
+      logInfo(`Call type delete result for ${id}: ${success ? 'Success' : 'Failed'}`);
+      
+      if (success) {
+        // Notify main window that call types have been updated
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send("callTypes:updated");
+        }
+      }
+      
+      return { success };
+    } catch (error) {
+      logError(`Error deleting call type: ${error.message}`);
+      return { success: false, error: error.message };
+    }
+  });
+
   // Handle context text update
   ipcMain.handle("context:save", (event, contextData) => {
     logVerbose("Received 'context:save' request from renderer.");
     try {
+      // If there's a callTypeId in the context data, set the current call type
+      if (contextData.callTypeId) {
+        currentCallType = settingsManager.getCallType(contextData.callTypeId);
+
+        // If call type has a description, use it as part of the context
+        if (currentCallType && currentCallType.description) {
+          // Strip HTML tags for clean text
+          const plainDescription = currentCallType.description.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+
+          // Include call type in the context
+          contextData.callTypeContext = `Call Type: ${currentCallType.name}\n${plainDescription}`;
+        }
+      }
+
       const updatedContext = updateInterviewContext(contextData);
       logInfo("Interview context updated successfully.");
       return { success: true, context: updatedContext };
@@ -1513,7 +1676,7 @@ app.whenReady().then(() => {
       return { success: false, error: error.message };
     }
   });
-  
+
   // Handle file uploads
   ipcMain.handle("context:upload", async (event, filePath) => {
     logVerbose("Received 'context:upload' request from renderer.");
@@ -1526,28 +1689,28 @@ app.whenReady().then(() => {
             { name: 'Text Files', extensions: ['txt', 'pdf'] }
           ]
         });
-        
+
         if (result.canceled || result.filePaths.length === 0) {
           return { success: false, error: "No file selected" };
         }
-        
+
         filePath = result.filePaths[0];
       }
-      
+
       // Handle text file
       if (filePath.toLowerCase().endsWith('.txt')) {
         const content = await handleTextFileUpload(filePath);
         return { success: true, content, filePath };
       }
       // TODO: Add PDF handling if needed
-      
+
       return { success: false, error: "Unsupported file type" };
     } catch (error) {
       logError("Failed to upload context file:", error.message);
       return { success: false, error: error.message };
     }
   });
-  
+
   // Handle analysis request
   ipcMain.handle("analysis:request", async () => {
     logVerbose("Received 'analysis:request' request from renderer.");
@@ -1559,7 +1722,7 @@ app.whenReady().then(() => {
       return { success: false, error: error.message };
     }
   });
-  
+
   // Handle insights request
   ipcMain.handle("insights:request", async () => {
     logVerbose("Received 'insights:request' request from renderer.");
@@ -1580,17 +1743,17 @@ app.whenReady().then(() => {
     const speakerOk = !!device;
     const message = `Test Results:\n- Microphone: ${micOk ? 'OK (Default)' : 'Error'}\n- Speaker Loopback: ${speakerOk ? `OK ('${device}')` : 'Error (pactl failed or PulseAudio issue)'}`;
     logInfo(message);
-    
+
     // Also show current VAD threshold settings
     const thresholdInfo = `VAD Thresholds: Speech=${VAD_AMPLITUDE_THRESHOLD}, Silence=${VAD_SILENCE_THRESHOLD}`;
     logInfo(thresholdInfo);
     mainWindow.webContents.send("status:update", message); // Send detailed status
     mainWindow.webContents.send("status:update", thresholdInfo); // Send threshold info
-    
+
     // Begin microphone level calibration
     if (micOk) {
       mainWindow.webContents.send("status:update", "Starting mic level calibration (5 seconds)...");
-      
+
       // Create a temporary recorder to measure mic levels
       const tempRecorder = new AudioRecorder({
         program: 'rec',
@@ -1603,48 +1766,48 @@ app.whenReady().then(() => {
         type: 'wav',
         silence: 0
       });
-      
+
       let maxAmplitude = 0;
       let minAmplitude = Infinity;
       let sampleCount = 0;
       let sumAmplitude = 0;
-      
+
       // Start recording and collect amplitude data
       try {
         tempRecorder.start();
         const stream = tempRecorder.stream();
-        
+
         // Process data chunks to analyze amplitude
         stream.on('data', (chunk) => {
           const samples = extractSamplesFromBuffer(chunk);
           const amplitude = calculateAmplitude(samples);
-          
+
           maxAmplitude = Math.max(maxAmplitude, amplitude);
-          if (amplitude > 0) minAmplitude = Math.min(minAmplitude, amplitude); 
+          if (amplitude > 0) minAmplitude = Math.min(minAmplitude, amplitude);
           sumAmplitude += amplitude;
           sampleCount++;
-          
+
           // Update UI with current level
           mainWindow.webContents.send("status:update", `[MIC] Level: ${amplitude.toFixed(0)} (calibrating)`);
         });
-        
+
         // Stop after 5 seconds and show results
         setTimeout(() => {
           try {
             tempRecorder.stop();
             const avgAmplitude = sumAmplitude / sampleCount;
-            
+
             // Calculate recommended thresholds
             const recommendedThreshold = Math.max(200, Math.ceil(avgAmplitude * 2));
             const recommendedSilence = Math.max(100, Math.ceil(avgAmplitude));
-            
-            const calibrationResult = 
+
+            const calibrationResult =
               `Mic Calibration Results:\n` +
               `- Max level: ${maxAmplitude.toFixed(0)}\n` +
               `- Min level: ${minAmplitude === Infinity ? 'N/A' : minAmplitude.toFixed(0)}\n` +
               `- Avg level: ${avgAmplitude.toFixed(0)}\n` +
               `- Recommended thresholds: Speech=${recommendedThreshold}, Silence=${recommendedSilence}`;
-            
+
             logInfo(calibrationResult);
             mainWindow.webContents.send("status:update", calibrationResult);
           } catch (err) {
@@ -1655,7 +1818,7 @@ app.whenReady().then(() => {
         logError("Error starting calibration recorder:", err);
       }
     }
-    
+
     return { micOk, speakerOk, speakerDevice: device };
   });
 

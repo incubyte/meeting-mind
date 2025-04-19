@@ -7,8 +7,10 @@ const transcriptOutputDiv = document.getElementById("transcriptOutput");
 const downloadTranscriptBtn = document.getElementById("downloadTranscriptBtn");
 const micMeterBar = document.getElementById("micMeterBar");
 const speakerMeterBar = document.getElementById("speakerMeterBar");
+const settingsBtn = document.getElementById("settingsBtn");
 
-// Interview context elements
+// Call and context elements
+const callTypeSelect = document.getElementById("callTypeSelect");
 const contextFileInput = document.getElementById("contextFileInput");
 const uploadFileBtn = document.getElementById("uploadFileBtn"); 
 const contextTextArea = document.getElementById("contextTextArea");
@@ -501,6 +503,77 @@ window.addEventListener('beforeunload', () => {
     window.electronAPI.removeAllListeners('recording:status');
     window.electronAPI.removeAllListeners('analysis:update');
     window.electronAPI.removeAllListeners('insights:update');
+    window.electronAPI.removeAllListeners('callTypes:updated');
+});
+
+// --- Call Type Management ---
+async function loadCallTypes() {
+  try {
+    const callTypes = await window.electronAPI.getCallTypes();
+    
+    // Clear existing options except the default
+    while (callTypeSelect.options.length > 1) {
+      callTypeSelect.remove(1);
+    }
+    
+    // Add call types to the dropdown
+    callTypes.forEach(callType => {
+      const option = new Option(callType.name, callType.id);
+      callTypeSelect.add(option);
+    });
+    
+    addStatusMessage(`Loaded ${callTypes.length} call types`);
+  } catch (error) {
+    console.error('Error loading call types:', error);
+    addStatusMessage(`Error loading call types: ${error.message}`);
+  }
+}
+
+// Settings button click handler
+settingsBtn.addEventListener('click', async () => {
+  try {
+    await window.electronAPI.openSettings();
+  } catch (error) {
+    console.error('Error opening settings:', error);
+    addStatusMessage(`Error opening settings: ${error.message}`);
+  }
+});
+
+// Update context save handler to include call type
+saveContextBtn.addEventListener("click", async () => {
+  const contextText = contextTextArea.value.trim();
+  const selectedCallTypeId = callTypeSelect.value;
+  
+  if (!contextText && !selectedCallTypeId) {
+    contextStatusSpan.textContent = "Please select a call type or provide context";
+    return;
+  }
+  
+  saveContextBtn.disabled = true;
+  contextStatusSpan.textContent = "Saving context...";
+  
+  try {
+    const result = await window.electronAPI.saveContext({
+      callTypeId: selectedCallTypeId,
+      additionalContext: contextText
+    });
+    
+    if (result.success) {
+      contextStatusSpan.textContent = "Context saved successfully";
+      addStatusMessage("Call context saved successfully.");
+      
+      // Enable the analysis button if we have context
+      requestAnalysisBtn.disabled = false;
+    } else {
+      contextStatusSpan.textContent = `Save failed: ${result.error}`;
+      addStatusMessage(`Failed to save context: ${result.error}`);
+    }
+  } catch (error) {
+    contextStatusSpan.textContent = "Save failed";
+    addStatusMessage(`Error saving context: ${error.message}`);
+  } finally {
+    saveContextBtn.disabled = false;
+  }
 });
 
 // Initial UI state
@@ -509,5 +582,27 @@ requestAnalysisBtn.disabled = true; // Disabled until context is provided
 
 // Position the threshold indicators for audio levels
 positionThresholdIndicators();
+
+// Load call types on startup
+loadCallTypes();
+
+// Listen for call types updates
+window.electronAPI.onCallTypesUpdated(() => {
+  addStatusMessage("Call types updated, refreshing dropdown");
+  loadCallTypes();
+});
+
+// Update UI when recording status changes
+window.electronAPI.onRecordingStatus((status) => {
+  if (status.isRecording) {
+    // Disable settings button during recording
+    settingsBtn.disabled = true;
+    settingsBtn.classList.add('opacity-50', 'cursor-not-allowed');
+  } else {
+    // Enable settings button when not recording
+    settingsBtn.disabled = false;
+    settingsBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+  }
+});
 
 addStatusMessage("Renderer process loaded.");

@@ -1,0 +1,19 @@
+{
+  "callTypes": [
+    {
+      "id": "interview",
+      "name": "Technical Interview",
+      "description": "<p>This is a technical interview to assess candidate skills.</p><p>Focus on both technical depth and communication.</p>"
+    },
+    {
+      "id": "sales-call",
+      "name": "Sales Call",
+      "description": "<p>Sales call with potential client.</p><p>Focus on understanding needs and presenting solutions.</p>"
+    },
+    {
+      "id": "asdada-m9nwxkdz",
+      "name": "1 - 1 call aaaa",
+      "description": "<p>1 - 1 call type</p>"
+    }
+  ]
+}

@@ -11,6 +11,8 @@ const settingsBtn = document.getElementById("settingsBtn");
 
 // Call and context elements
 const callTypeSelect = document.getElementById("callTypeSelect");
+const contextToggle = document.getElementById("contextToggle");
+const contextFields = document.getElementById("contextFields");
 const contextFileInput = document.getElementById("contextFileInput");
 const uploadFileBtn = document.getElementById("uploadFileBtn"); 
 const contextTextArea = document.getElementById("contextTextArea");
@@ -363,10 +365,64 @@ window.electronAPI.onRecordingStatus(({ isRecording, error }) => {
 
 // --- Context Management ---
 uploadFileBtn.addEventListener("click", async () => {
-  const filePath = contextFileInput.files[0]?.path;
-  if (!filePath) {
+  // If context fields are hidden, show them first
+  if (contextFields.classList.contains('hidden')) {
+    contextToggle.checked = true;
+    contextFields.classList.remove('hidden');
+    // Give time for the UI to update before checking the file
+    setTimeout(() => {
+      checkAndUploadFile();
+    }, 100);
+  } else {
+    checkAndUploadFile();
+  }
+});
+
+async function checkAndUploadFile() {
+  const fileObj = contextFileInput.files[0];
+  
+  console.log("File object:", fileObj);
+  
+  // Check if we have a file selected
+  if (!fileObj) {
     addStatusMessage("No file selected. Please select a file first.");
+    contextStatusSpan.textContent = "No file selected";
     return;
+  }
+  
+  // Handle the file path differently based on browser compatibility
+  // Some browsers use path, others use webkitRelativePath or name
+  let filePath;
+  if (fileObj.path) {
+    filePath = fileObj.path;
+  } else if (typeof window.electronAPI?.getFilePath === 'function') {
+    // If we have a special electron API for getting file paths
+    try {
+      filePath = await window.electronAPI.getFilePath(fileObj);
+    } catch (error) {
+      console.error("Error getting file path:", error);
+    }
+  }
+  
+  // If we still don't have a path, use the file dialog
+  if (!filePath) {
+    try {
+      // Tell the main process to open a file dialog
+      const result = await window.electronAPI.uploadContextFile();
+      if (result.success) {
+        // The main process handled the file selection and processing
+        handleUploadResult(result);
+        return;
+      } else {
+        addStatusMessage("File selection canceled or failed.");
+        contextStatusSpan.textContent = "File selection canceled";
+        return;
+      }
+    } catch (error) {
+      addStatusMessage(`Error with file dialog: ${error.message}`);
+      contextStatusSpan.textContent = "Error selecting file";
+      return;
+    }
   }
   
   uploadFileBtn.disabled = true;
@@ -374,21 +430,68 @@ uploadFileBtn.addEventListener("click", async () => {
   
   try {
     const result = await window.electronAPI.uploadContextFile(filePath);
-    if (result.success) {
-      contextTextArea.value = result.content;
-      contextStatusSpan.textContent = `File uploaded: ${result.filePath.split('/').pop()}`;
-      addStatusMessage(`Context file uploaded successfully.`);
-    } else {
-      contextStatusSpan.textContent = `Upload failed: ${result.error}`;
-      addStatusMessage(`Context file upload failed: ${result.error}`);
-    }
+    handleUploadResult(result);
   } catch (error) {
     contextStatusSpan.textContent = "Upload failed";
     addStatusMessage(`Error uploading context file: ${error.message}`);
-  } finally {
     uploadFileBtn.disabled = false;
   }
-});
+}
+
+// Process the upload result
+function handleUploadResult(result) {
+  if (result.success) {
+    // Set the content in the textarea
+    contextTextArea.value = result.content;
+    
+    // If it's a PDF file and has a summary, request early analysis
+    if (result.isPdf && result.summary) {
+      // Store the summary as additional context
+      handleSaveContext({
+        isPdf: true, 
+        summary: result.summary
+      });
+      
+      // Request an initial analysis
+      requestEarlyAnalysis(result.summary);
+      
+      contextStatusSpan.textContent = `PDF uploaded and analyzed: ${result.filePath.split('/').pop()}`;
+      addStatusMessage(`PDF uploaded and analyzed. Initial insights provided.`);
+    } else {
+      contextStatusSpan.textContent = `File uploaded: ${result.filePath.split('/').pop()}`;
+      addStatusMessage(`Context file uploaded successfully.`);
+    }
+  } else {
+    contextStatusSpan.textContent = `Upload failed: ${result.error}`;
+    addStatusMessage(`Context file upload failed: ${result.error}`);
+  }
+  
+  uploadFileBtn.disabled = false;
+}
+
+// Function to request early analysis based on document summary
+async function requestEarlyAnalysis(summary) {
+  try {
+    // Call analysis API with the document summary
+    const result = await window.electronAPI.requestAnalysis();
+    if (result.success) {
+      // Format the analysis result with line breaks
+      const formattedAnalysis = result.analysis.replace(/\n/g, '<br>');
+      analysisOutputDiv.innerHTML = formattedAnalysis;
+      
+      // Make insights available too
+      const insightsResult = await window.electronAPI.requestInsights();
+      if (insightsResult.success) {
+        insightsOutputDiv.innerHTML = insightsResult.insights.replace(/\n/g, '<br>');
+      }
+      
+      // Enable the analysis button
+      requestAnalysisBtn.disabled = false;
+    }
+  } catch (error) {
+    addStatusMessage(`Error generating early insights: ${error.message}`);
+  }
+}
 
 saveContextBtn.addEventListener("click", async () => {
   const contextText = contextTextArea.value.trim();
@@ -541,9 +644,45 @@ settingsBtn.addEventListener('click', async () => {
 
 // Update context save handler to include call type
 saveContextBtn.addEventListener("click", async () => {
-  const contextText = contextTextArea.value.trim();
-  const selectedCallTypeId = callTypeSelect.value;
+  // If context fields are hidden, show them first
+  if (contextFields.classList.contains('hidden')) {
+    contextToggle.checked = true;
+    contextFields.classList.remove('hidden');
+    // Let UI update before continuing
+    return setTimeout(() => {
+      handleSaveContext();
+    }, 100);
+  } else {
+    handleSaveContext();
+  }
+});
+
+async function handleSaveContext(customContext) {
+  // Use provided custom context or get values from form
+  const contextText = customContext ? undefined : contextTextArea.value.trim();
+  const selectedCallTypeId = customContext ? undefined : callTypeSelect.value;
   
+  // If custom context object was provided, use that directly
+  if (customContext) {
+    try {
+      const result = await window.electronAPI.saveContext({
+        ...(customContext.isPdf && { documentSummary: customContext.summary }),
+        ...(customContext.additionalContext && { additionalContext: customContext.additionalContext })
+      });
+      
+      if (result.success) {
+        addStatusMessage("Document context saved successfully.");
+        requestAnalysisBtn.disabled = false;
+        return true;
+      }
+      return false;
+    } catch (error) {
+      addStatusMessage(`Error saving document context: ${error.message}`);
+      return false;
+    }
+  }
+  
+  // Regular form submission flow
   if (!contextText && !selectedCallTypeId) {
     contextStatusSpan.textContent = "Please select a call type or provide context";
     return;
@@ -574,7 +713,7 @@ saveContextBtn.addEventListener("click", async () => {
   } finally {
     saveContextBtn.disabled = false;
   }
-});
+}
 
 // Initial UI state
 stopRecordingBtn.disabled = true;
@@ -582,6 +721,15 @@ requestAnalysisBtn.disabled = true; // Disabled until context is provided
 
 // Position the threshold indicators for audio levels
 positionThresholdIndicators();
+
+// Context toggle functionality
+contextToggle.addEventListener('change', () => {
+  if (contextToggle.checked) {
+    contextFields.classList.remove('hidden');
+  } else {
+    contextFields.classList.add('hidden');
+  }
+});
 
 // Load call types on startup
 loadCallTypes();

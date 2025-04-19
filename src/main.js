@@ -503,6 +503,7 @@ let interviewContext = {
   jobDescription: "",       // Job description or agenda
   candidateInfo: "",        // Information about the candidate
   additionalContext: "",    // Any additional context provided
+  documentSummary: "",      // Summary of uploaded PDF document
   systemPrompt: "",         // Base system prompt for LLM
 };
 
@@ -649,6 +650,16 @@ IMPORTANT GUIDELINES:
 - Do not skip any questions - identify and evaluate every Q&A pair
 - Only provide insights when you can identify clear Q&A exchanges - if none exist yet, state "Waiting for complete Q&A exchanges to provide insights."
 `;
+
+  // Add document summary if available
+  if (interviewContext.documentSummary) {
+    systemPrompt += `\n\nDOCUMENT SUMMARY:\n${interviewContext.documentSummary}\n`;
+    
+    // If transcript is empty, provide initial document insights
+    if (transcriptBuffer.length === 0) {
+      systemPrompt += `\n\nALSO IMPORTANT: Since the conversation hasn't started yet, begin by providing 2-3 insightful questions that could be asked based on the document provided. These should be specific to the document content and appropriate for the context.`;
+    }
+  }
 
   // Add call type context if available
   if (interviewContext.callTypeContext) {
@@ -913,6 +924,118 @@ async function handleTextFileUpload(filePath) {
   } catch (error) {
     logError("Error reading text file:", error.message);
     throw error;
+  }
+}
+
+/**
+ * Handle a PDF file upload by using LLM to parse its contents
+ * @param {string} filePath - Path to the PDF file
+ * @returns {Promise<string>} The extracted and parsed content
+ */
+async function handlePdfFileWithLLM(filePath) {
+  try {
+    logInfo(`Processing PDF file with LLM: ${filePath}`);
+    
+    // Read the file as binary data
+    const pdfBuffer = fs.readFileSync(filePath);
+    
+    // Convert to base64 for easier handling
+    const base64Data = pdfBuffer.toString('base64');
+    
+    // Get the filename for reference
+    const filename = path.basename(filePath);
+    
+    // Create OpenRouter client for LLM processing
+    const openRouterClient = createOpenRouterClient();
+    
+    // Create a prompt for the LLM to process the PDF
+    const response = await openRouterClient.chat.completions.create({
+      model: LLM_MODEL,
+      messages: [
+        { 
+          role: "system", 
+          content: "You are a helpful assistant that extracts and organizes information from PDFs. Return the content in a clear, structured format keeping all important information including headers, bullet points, and key details." 
+        },
+        { 
+          role: "user", 
+          content: [
+            { 
+              type: "text", 
+              text: `Extract all text content from this PDF document. The file is named "${filename}". Return the extracted content in a well-formatted structure.` 
+            },
+            {
+              type: "image_url",
+              image_url: {
+                url: `data:application/pdf;base64,${base64Data}`
+              }
+            }
+          ]
+        }
+      ],
+      temperature: 0.2, // Lower temperature for more factual extraction
+      max_tokens: 4000
+    });
+    
+    // Extract content from response
+    const extractedContent = response.choices[0]?.message?.content || "Failed to extract PDF content.";
+    logInfo("PDF content extracted successfully by LLM");
+    
+    return extractedContent;
+  } catch (error) {
+    logError("Error processing PDF with LLM:", error.message);
+    throw error;
+  }
+}
+
+/**
+ * Generate a summary of document content using LLM
+ * @param {string} content - Document content to summarize
+ * @param {string} filename - Name of the file for reference
+ * @returns {Promise<string>} Concise summary of the document
+ */
+async function generateDocumentSummary(content, filename) {
+  try {
+    logInfo(`Generating summary for document: ${filename}`);
+    
+    // Limit content length if too large to avoid token limits
+    const truncatedContent = content.length > 20000 
+      ? content.substring(0, 20000) + "\n\n[Content truncated due to length]" 
+      : content;
+    
+    // Create OpenRouter client for LLM processing
+    const openRouterClient = createOpenRouterClient();
+    
+    // Create a prompt for the LLM to summarize the content
+    const response = await openRouterClient.chat.completions.create({
+      model: LLM_MODEL,
+      messages: [
+        { 
+          role: "system", 
+          content: `You are an expert summarizer who distills complex documents into concise, informative summaries. 
+                    Your summaries capture key points and main ideas while maintaining factual accuracy.
+                    Format your summary with clear sections, bullet points for key information, and a brief overview.` 
+        },
+        { 
+          role: "user", 
+          content: `Create a comprehensive yet concise summary of this document: "${filename}".
+                   Include the most important information, key details, and main points.
+                   
+                   DOCUMENT CONTENT:
+                   ${truncatedContent}`
+        }
+      ],
+      temperature: 0.3,
+      max_tokens: 800
+    });
+    
+    // Extract content from response
+    const summary = response.choices[0]?.message?.content || "Failed to generate summary.";
+    logInfo("Document summary generated successfully");
+    
+    return summary;
+  } catch (error) {
+    logError("Error generating document summary:", error.message);
+    return "Could not generate summary due to an error.";
   }
 }
 
@@ -1714,7 +1837,7 @@ app.whenReady().then(() => {
         const result = await dialog.showOpenDialog({
           properties: ['openFile'],
           filters: [
-            { name: 'Text Files', extensions: ['txt', 'pdf'] }
+            { name: 'Context Files', extensions: ['txt', 'pdf'] }
           ]
         });
 
@@ -1724,15 +1847,52 @@ app.whenReady().then(() => {
 
         filePath = result.filePaths[0];
       }
+      
+      // Log the file path to help debug path issues
+      logInfo(`Processing file: ${filePath}`);
+
+      let content = '';
+      let isPdf = false;
+
+      try {
+        // Check if file exists
+        await fs.promises.access(filePath);
+      } catch (err) {
+        logError(`File does not exist or cannot be accessed: ${filePath}`);
+        return { success: false, error: "File cannot be accessed. Please try again or choose another file." };
+      }
 
       // Handle text file
       if (filePath.toLowerCase().endsWith('.txt')) {
-        const content = await handleTextFileUpload(filePath);
-        return { success: true, content, filePath };
+        content = await handleTextFileUpload(filePath);
       }
-      // TODO: Add PDF handling if needed
+      // Handle PDF file using LLM
+      else if (filePath.toLowerCase().endsWith('.pdf')) {
+        content = await handlePdfFileWithLLM(filePath);
+        isPdf = true;
+      }
+      else {
+        return { success: false, error: "Unsupported file type. Please upload .txt or .pdf files." };
+      }
 
-      return { success: false, error: "Unsupported file type" };
+      // Generate a summary if it's a PDF file
+      let summary = '';
+      if (isPdf) {
+        logInfo(`Generating summary for PDF: ${path.basename(filePath)}`);
+        summary = await generateDocumentSummary(content, path.basename(filePath));
+        
+        // Store in interview context directly
+        interviewContext.documentSummary = summary;
+        interviewContext.systemPrompt = buildSystemPrompt();
+      }
+
+      return { 
+        success: true, 
+        content, 
+        filePath,
+        isPdf,
+        summary
+      };
     } catch (error) {
       logError("Failed to upload context file:", error.message);
       return { success: false, error: error.message };

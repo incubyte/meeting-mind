@@ -149,6 +149,23 @@ button:disabled {
   @apply text-xs text-gray-400 italic;
 }
 
+/* Toggle switch styling */
+.toggle-label {
+  @apply bg-gray-300 block w-10 h-6 overflow-hidden rounded-full cursor-pointer transition-colors duration-200;
+}
+
+#contextToggle:checked + .toggle-label {
+  @apply bg-blue-500;
+}
+
+#contextToggle:checked + .toggle-label .toggle-dot {
+  transform: translateX(100%);
+}
+
+.toggle-dot {
+  @apply block w-6 h-6 bg-white rounded-full shadow transform transition-transform duration-200 ease-in-out;
+}
+
 /* Analysis section styles */
 #analysisOutput {
   @apply text-gray-700 whitespace-pre-line;

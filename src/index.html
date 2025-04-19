@@ -101,46 +101,57 @@
                   </select>
                 </div>
               </div>
-              <div>
-                <label class="block mb-1 text-sm font-medium"
-                  >Upload Context (PDF/Text):</label
-                >
-                <div class="flex gap-2">
-                  <input
-                    type="file"
-                    id="contextFileInput"
-                    accept=".pdf,.txt"
-                    class="border rounded p-1 flex-grow text-sm"
-                  />
-                  <button
-                    id="uploadFileBtn"
-                    class="bg-blue-500 hover:bg-blue-600 text-sm py-1 px-3"
-                  >
-                    Upload
-                  </button>
+              <div class="flex items-center gap-2 mb-2">
+                <label class="text-sm font-medium">Include Context:</label>
+                <div class="relative inline-block w-10 mr-2 align-middle select-none">
+                  <input type="checkbox" id="contextToggle" class="sr-only" />
+                  <label for="contextToggle" class="toggle-label block overflow-hidden h-6 rounded-full bg-gray-300 cursor-pointer">
+                    <span class="block w-6 h-6 rounded-full bg-white shadow transform transition-transform duration-200 ease-in-out toggle-dot"></span>
+                  </label>
                 </div>
               </div>
-              <div>
-                <label class="block mb-1 text-sm font-medium"
-                  >Additional Context:</label
-                >
-                <textarea
-                  id="contextTextArea"
-                  class="w-full h-24 border rounded p-2 text-sm"
-                  placeholder="Enter additional context, job description, or participant information here..."
-                ></textarea>
-              </div>
-              <div class="flex items-center gap-2">
-                <button
-                  id="saveContextBtn"
-                  class="bg-blue-500 hover:bg-blue-600 text-sm py-1 px-3"
-                >
-                  Save Context
-                </button>
-                <span
-                  id="contextStatus"
-                  class="italic text-gray-500 text-sm"
-                ></span>
+              <div id="contextFields" class="hidden">
+                <div>
+                  <label class="block mb-1 text-sm font-medium"
+                    >Upload Context (PDF/Text):</label
+                  >
+                  <div class="flex gap-2">
+                    <input
+                      type="file"
+                      id="contextFileInput"
+                      accept=".pdf,.txt"
+                      class="border rounded p-1 flex-grow text-sm"
+                    />
+                    <button
+                      id="uploadFileBtn"
+                      class="bg-blue-500 hover:bg-blue-600 text-sm py-1 px-3"
+                    >
+                      Upload
+                    </button>
+                  </div>
+                </div>
+                <div class="mt-2">
+                  <label class="block mb-1 text-sm font-medium"
+                    >Additional Context:</label
+                  >
+                  <textarea
+                    id="contextTextArea"
+                    class="w-full h-24 border rounded p-2 text-sm"
+                    placeholder="Enter additional context, job description, or participant information here..."
+                  ></textarea>
+                </div>
+                <div class="flex items-center gap-2 mt-2">
+                  <button
+                    id="saveContextBtn"
+                    class="bg-blue-500 hover:bg-blue-600 text-sm py-1 px-3"
+                  >
+                    Save Context
+                  </button>
+                  <span
+                    id="contextStatus"
+                    class="italic text-gray-500 text-sm"
+                  ></span>
+                </div>
               </div>
             </div>
           </section>

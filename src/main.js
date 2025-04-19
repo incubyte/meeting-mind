@@ -1475,25 +1475,36 @@ function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1024,
     height: 768,
+    show: false, // Hide until ready-to-show event
+    autoHideMenuBar: false,
+    darkTheme: true,
+    fullscreenable: true,
+    title: "Meeting Mind",
     webPreferences: {
       preload: path.join(import.meta.dirname, "preload.js"),
       contextIsolation: true, // Recommended for security
       nodeIntegration: false, // Recommended for security
-    },
-    // Set default state to be maximized
-    show: false // Hide until ready-to-show event
+    }
   });
 
-  // Once DOM is ready, show window maximized
+  // Once DOM is ready, show the window then maximize after a short delay
   mainWindow.once('ready-to-show', () => {
-    mainWindow.maximize();
     mainWindow.show();
+    
+    // Remove menu completely for a cleaner interface
+    mainWindow.setMenu(null);
+    
+    // Use a short timeout to ensure the window is fully rendered before maximizing
+    setTimeout(() => {
+      mainWindow.maximize();
+      logInfo("Window maximized");
+    }, 100);
   });
 
   mainWindow.loadFile(path.join("src/index.html"));
 
   // Open DevTools - Remove for production
-  mainWindow.webContents.openDevTools();
+  // mainWindow.webContents.openDevTools();
 
   mainWindow.on("closed", () => {
     mainWindow = null;
@@ -1516,24 +1527,41 @@ function createSettingsWindow() {
     return;
   }
 
-  // Create the settings window
+  // Create the settings window with larger initial dimensions
   settingsWindow = new BrowserWindow({
-    width: 1024,
-    height: 768,
+    width: 1280,  // Increased from 1024
+    height: 900,  // Increased from 768
     parent: mainWindow,
     modal: false,
+    show: false, // Hide until ready-to-show event
+    autoHideMenuBar: true, // Hide the menu bar (File, Edit, View, etc.)
+    fullscreenable: true,
+    title: "Meeting Mind Settings",
     webPreferences: {
       preload: path.join(import.meta.dirname, "preload.js"),
       contextIsolation: true,
       nodeIntegration: false,
-    },
-    show: false // Hide until ready-to-show event
+    }
   });
 
-  // Once DOM is ready, show window maximized
+  // Once DOM is ready, show the window then maximize after a delay
   settingsWindow.once('ready-to-show', () => {
-    settingsWindow.maximize();
     settingsWindow.show();
+    
+    // Remove menu completely (more reliable than just autoHideMenuBar)
+    settingsWindow.setMenu(null);
+    
+    // Use a longer timeout to ensure the window is fully rendered before maximizing
+    setTimeout(() => {
+      settingsWindow.maximize();
+      logInfo("Settings window maximized");
+      
+      // Add a resize event handler to log window size for debugging
+      settingsWindow.on('resize', () => {
+        const size = settingsWindow.getSize();
+        logInfo(`Settings window resized to: ${size[0]}x${size[1]}`);
+      });
+    }, 200);
   });
 
   settingsWindow.loadFile(path.join("src/settings.html"));
@@ -1595,14 +1623,14 @@ app.whenReady().then(() => {
     try {
       const success = settingsManager.addCallType(callType);
       logInfo(`Call type add result: ${success ? 'Success' : 'Failed'}`);
-      
+
       if (success) {
         // Notify main window that call types have been updated
         if (mainWindow && !mainWindow.isDestroyed()) {
           mainWindow.webContents.send("callTypes:updated");
         }
       }
-      
+
       return { success };
     } catch (error) {
       logError(`Error adding call type: ${error.message}`);
@@ -1615,14 +1643,14 @@ app.whenReady().then(() => {
     try {
       const success = settingsManager.updateCallType(id, updates);
       logInfo(`Call type update result for ${id}: ${success ? 'Success' : 'Failed'}`);
-      
+
       if (success) {
         // Notify main window that call types have been updated
         if (mainWindow && !mainWindow.isDestroyed()) {
           mainWindow.webContents.send("callTypes:updated");
         }
       }
-      
+
       return { success };
     } catch (error) {
       logError(`Error updating call type: ${error.message}`);
@@ -1635,14 +1663,14 @@ app.whenReady().then(() => {
     try {
       const success = settingsManager.deleteCallType(id);
       logInfo(`Call type delete result for ${id}: ${success ? 'Success' : 'Failed'}`);
-      
+
       if (success) {
         // Notify main window that call types have been updated
         if (mainWindow && !mainWindow.isDestroyed()) {
           mainWindow.webContents.send("callTypes:updated");
         }
       }
-      
+
       return { success };
     } catch (error) {
       logError(`Error deleting call type: ${error.message}`);

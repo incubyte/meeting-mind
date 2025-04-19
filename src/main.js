@@ -498,10 +498,10 @@ let vadState = {
 let transcriptBuffer = []; // { id: number, timestamp: Date, lastUpdated: Date, source: string, text: string }[]
 let chunkCounter = 0;
 
-// Interview assistant context
+// Meeting assistant context
 let interviewContext = {
   jobDescription: "",       // Job description or agenda
-  candidateInfo: "",        // Information about the candidate
+  candidateInfo: "",        // Information about participants
   additionalContext: "",    // Any additional context provided
   documentSummary: "",      // Summary of uploaded PDF document
   systemPrompt: "",         // Base system prompt for LLM
@@ -699,9 +699,9 @@ function addContextToPrompt(basePrompt) {
     systemPrompt += `\n\nJOB DESCRIPTION:\n${interviewContext.jobDescription}\n`;
   }
 
-  // Add candidate information if available
+  // Add participant information if available
   if (interviewContext.candidateInfo) {
-    systemPrompt += `\n\nCANDIDATE INFORMATION:\n${interviewContext.candidateInfo}\n`;
+    systemPrompt += `\n\nPARTICIPANT INFORMATION:\n${interviewContext.candidateInfo}\n`;
   }
 
   // Add any additional context provided
@@ -736,21 +736,21 @@ function formatTranscriptForLLM(transcriptItems, purpose = 'analysis') {
 
   // Format the transcript as a conversation
   let formattedTranscript = sortedItems.map(item => {
-    const speaker = item.source === "You" ? "Interviewer" : "Candidate";
+    const speaker = item.source === "You" ? "Speaker 1" : "Speaker 2";
     return `${speaker}: ${item.text}`;
   }).join("\n\n");
 
   // For insights format, provide improved instructions for Q&A detection
   if (purpose === 'insights') {
-    formattedTranscript = `Please analyze the following transcript and identify all interview questions and answers.
+    formattedTranscript = `Please analyze the following transcript and identify all questions and answers.
 
 IMPORTANT INSTRUCTIONS:
-1. Identify ALL questions asked by the Interviewer, even brief or follow-up questions
-2. Each detected question should be paired with its corresponding answer from the Candidate
+1. Identify ALL questions asked by Speaker 1, even brief or follow-up questions
+2. Each detected question should be paired with its corresponding answer from Speaker 2
 3. Format each Q&A pair exactly as follows:
-   - "Q: <interviewer's question>"
+   - "Q: <Speaker 1's question>"
    - "ANSWER REVIEW: <brief assessment of technical accuracy and completeness>"
-   - "CANDIDATE RESPONSE: <summarized response>"
+   - "RESPONSE: <summarized response from Speaker 2>"
 4. Even if a question is unclear or implicit, still identify it as a separate Q&A pair
 5. If multiple questions are asked consecutively without answers between them, treat them as a single complex question
 6. Do not skip any questions, even if they seem minor or repetitive
@@ -763,7 +763,7 @@ ${formattedTranscript}`;
 }
 
 /**
- * Perform analysis on the current transcript
+ * Perform analysis on the current conversation transcript
  * @param {boolean} forceTrigger - Whether to force the analysis even if the conditions aren't met
  * @returns {Promise<string>} The analysis result
  */
@@ -779,10 +779,10 @@ async function analyzeInterview(forceTrigger = false) {
     return "Analysis requested too soon after the last one.";
   }
 
-  // Check if we have at least one utterance from the candidate (source = "Other")
+  // Check if we have at least one utterance from Speaker 2 (source = "Other")
   const hasOtherSpeaker = transcriptBuffer.some(item => item.source === "Other");
   if (!hasOtherSpeaker) {
-    return "Waiting for the candidate to speak before providing analysis.";
+    return "Waiting for Speaker 2 to speak before providing analysis.";
   }
 
   // Check if there's enough new content since the last analysis
@@ -812,7 +812,7 @@ async function analyzeInterview(forceTrigger = false) {
       model: LLM_MODEL,
       messages: [
         { role: "system", content: systemPrompt },
-        { role: "user", content: `Here is the current interview transcript. Provide ONLY your Analysis & Suggestions for the panel. DO NOT include any Q&A evaluation in this response:\n\n${formattedTranscript}` }
+        { role: "user", content: `Here is the current conversation transcript. Provide ONLY your Analysis & Suggestions for the panel. DO NOT include any Q&A evaluation in this response:\n\n${formattedTranscript}` }
       ],
       temperature: 0.3, // Lower temperature for more focused responses
       max_tokens: 1000
@@ -824,14 +824,14 @@ async function analyzeInterview(forceTrigger = false) {
     analysisPending = false;
     return analysisResult;
   } catch (error) {
-    logError("Error performing interview analysis:", error.message);
+    logError("Error performing conversation analysis:", error.message);
     analysisPending = false;
     return `Analysis failed due to error: ${error.message}`;
   }
 }
 
 /**
- * Generate interview insights based on Q&A pairs
+ * Generate conversation insights based on Q&A pairs
  * @param {boolean} forceTrigger - Whether to force insights generation
  * @returns {Promise<string>} The insights result
  */
@@ -847,10 +847,10 @@ async function generateInterviewInsights(forceTrigger = false) {
     return "Insights requested too soon after the last generation.";
   }
 
-  // Check if we have at least one utterance from the candidate (source = "Other")
+  // Check if we have at least one utterance from Speaker 2 (source = "Other")
   const hasOtherSpeaker = transcriptBuffer.some(item => item.source === "Other");
   if (!hasOtherSpeaker) {
-    return "Waiting for the candidate to speak before providing insights.";
+    return "Waiting for Speaker 2 to speak before providing insights.";
   }
 
   // If we get here, generate the insights
@@ -864,11 +864,11 @@ async function generateInterviewInsights(forceTrigger = false) {
     const formattedTranscript = formatTranscriptForLLM(transcriptBuffer, 'insights');
 
     // Enhanced prompt for better Q&A identification
-    const userPrompt = `Thoroughly analyze this interview transcript and identify ALL question-answer pairs.
+    const userPrompt = `Thoroughly analyze this conversation transcript and identify ALL question-answer pairs.
 
 YOUR TASK:
-1. Identify EVERY question asked by the interviewer, even brief follow-ups or clarifications
-2. For each question, evaluate the corresponding answer
+1. Identify EVERY question asked by Speaker 1, even brief follow-ups or clarifications
+2. For each question, evaluate the corresponding answer from Speaker 2
 3. Format your response as a series of Q&A evaluations
 
 Remember to:
@@ -896,7 +896,7 @@ ${formattedTranscript}`;
     insightsPending = false;
     return insightsResult;
   } catch (error) {
-    logError("Error generating interview insights:", error.message);
+    logError("Error generating conversation insights:", error.message);
     insightsPending = false;
     return `Insights generation failed due to error: ${error.message}`;
   }
@@ -919,7 +919,7 @@ function checkAutoTriggerAnalysis(source) {
     source === 'speaker' &&
     !analysisPending
   ) {
-    logVerbose("Auto-triggering interview analysis after candidate speech...");
+    logVerbose("Auto-triggering analysis after Speaker 2 speech...");
     // Perform the analysis and send results to renderer
     analyzeInterview().then(result => {
       if (mainWindow) {

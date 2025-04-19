@@ -151,7 +151,7 @@ function updateTranscript(transcriptItems) {
   // Create a header to show we're in a chat view
   const chatHeader = document.createElement("div");
   chatHeader.classList.add("chat-header");
-  chatHeader.innerHTML = "<span class='chat-participant you'>You</span> and <span class='chat-participant other'>Candidate</span>";
+  chatHeader.innerHTML = "<span class='chat-participant you'>Speaker 1</span> and <span class='chat-participant other'>Speaker 2</span>";
   chatContainer.appendChild(chatHeader);
   
   // Create the messages area
@@ -188,7 +188,7 @@ function updateTranscript(transcriptItems) {
     
     const nameSpan = document.createElement("div");
     nameSpan.classList.add("message-name");
-    nameSpan.textContent = item.source === "You" ? "You (Interviewer)" : "Candidate";
+    nameSpan.textContent = item.source === "You" ? "Speaker 1" : "Speaker 2";
     
     const textDiv = document.createElement("div");
     textDiv.classList.add("message-text");

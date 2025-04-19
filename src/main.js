@@ -811,7 +811,7 @@ async function generateInterviewInsights(forceTrigger = false) {
   lastInsightsTime = now;
 
   try {
-    logInfo("Generating interview Q&A insights...");
+    logInfo("Generating Q&A insights...");
     const openRouterClient = createOpenRouterClient();
     const systemPrompt = buildSystemPrompt();
     const formattedTranscript = formatTranscriptForLLM(transcriptBuffer, 'insights');

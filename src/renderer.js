@@ -158,8 +158,16 @@ function updateTranscript(transcriptItems) {
   const messagesArea = document.createElement("div");
   messagesArea.classList.add("chat-messages");
   
-  // Ensure the transcript items are sorted by timestamp
-  const sortedItems = [...transcriptItems].sort((a, b) => {
+  // Filter out items with only "you" text and sort by timestamp
+  const filteredItems = [...transcriptItems].filter(item => {
+    // Get cleaned up text (trimmed and lowercase)
+    const cleanText = item.text?.trim().toLowerCase();
+    // Filter out if text is only "you"
+    return cleanText !== "you";
+  });
+  
+  // Sort the filtered items by timestamp
+  const sortedItems = filteredItems.sort((a, b) => {
     const timeA = a.timestamp instanceof Date ? a.timestamp : new Date(a.timestamp);
     const timeB = b.timestamp instanceof Date ? b.timestamp : new Date(b.timestamp);
     return timeA - timeB;
@@ -211,8 +219,9 @@ function updateTranscript(transcriptItems) {
   chatContainer.appendChild(messagesArea);
   transcriptOutputDiv.appendChild(chatContainer);
   
-  // Scroll to bottom
+  // Scroll to bottom - both the messages area and the transcript container
   messagesArea.scrollTop = messagesArea.scrollHeight;
+  transcriptOutputDiv.scrollTop = transcriptOutputDiv.scrollHeight;
 }
 
 // Function to download transcript as text or JSON

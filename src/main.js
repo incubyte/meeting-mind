@@ -1273,6 +1273,12 @@ async function transcribeAudioChunk(filePath, source) {
         // Append to the existing message from this source
         const latestMessage = findLatestTranscriptFromSource(source);
 
+        // Skip if trying to append just "you" (case insensitive)
+        if (text.trim().toLowerCase() === "you") {
+          logVerbose(`Skipping appending just "you" to existing message`);
+          return;
+        }
+        
         // Only append if the new text adds information
         if (text.length > latestMessage.text.length || !latestMessage.text.includes(text)) {
           logVerbose(`Appending to existing ${source} message: "${latestMessage.text}" + "${text}"`);
@@ -1291,6 +1297,12 @@ async function transcribeAudioChunk(filePath, source) {
         }
       }
       else {
+        // Skip if text is only "you" (case insensitive)
+        if (text.trim().toLowerCase() === "you") {
+          logVerbose(`Skipping transcription with just "you": "${text}"`);
+          return; // Skip adding to buffer
+        }
+        
         // Create a new transcript entry
         logVerbose(`Adding new transcription: "${text}"`);
         transcriptBuffer.push({

@@ -928,67 +928,88 @@ async function handleTextFileUpload(filePath) {
 }
 
 /**
- * Handle a PDF file upload by using LLM to parse its contents
+ * Handle a PDF file upload by using OpenAI to parse its contents
+ * First extract text with a local tool, then enhance with OpenAI
  * @param {string} filePath - Path to the PDF file
  * @returns {Promise<string>} The extracted and parsed content
  */
 async function handlePdfFileWithLLM(filePath) {
   try {
-    logInfo(`Processing PDF file with LLM: ${filePath}`);
-    
-    // Read the file as binary data
-    const pdfBuffer = fs.readFileSync(filePath);
-    
-    // Convert to base64 for easier handling
-    const base64Data = pdfBuffer.toString('base64');
+    logInfo(`Processing PDF file with pdftotext and OpenAI: ${filePath}`);
     
     // Get the filename for reference
     const filename = path.basename(filePath);
     
-    // Create OpenRouter client for LLM processing
-    const openRouterClient = createOpenRouterClient();
+    // Step 1: Extract raw text from PDF using pdftotext (via child_process)
+    // Create a temporary output file
+    const tempOutputPath = path.join(os.tmpdir(), `pdf-extract-${Date.now()}.txt`);
+    logInfo(`Extracting text from PDF to: ${tempOutputPath}`);
     
-    // Create a prompt for the LLM to process the PDF
-    const response = await openRouterClient.chat.completions.create({
-      model: LLM_MODEL,
+    try {
+      // Use pdftotext to extract raw text (assumes pdftotext is installed)
+      await execPromise(`pdftotext -layout "${filePath}" "${tempOutputPath}"`);
+      logInfo("PDF text extraction completed");
+    } catch (pdfError) {
+      logWarn(`pdftotext extraction failed: ${pdfError.message}. Falling back to basic extraction.`);
+      // If pdftotext fails, we'll continue with just the filename for basic analysis
+    }
+    
+    // Step 2: Read extracted text if available
+    let extractedText = "";
+    try {
+      if (fs.existsSync(tempOutputPath)) {
+        extractedText = fs.readFileSync(tempOutputPath, 'utf8');
+        logInfo(`Raw text extracted from PDF (${extractedText.length} characters)`);
+      }
+    } catch (readError) {
+      logWarn(`Could not read extracted PDF text: ${readError.message}`);
+    }
+    
+    // Step 3: Process with OpenAI to improve formatting and structure
+    logInfo("Sending PDF content to OpenAI for processing");
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o-mini", // Using GPT-4o Mini for processing
       messages: [
         { 
           role: "system", 
-          content: "You are a helpful assistant that extracts and organizes information from PDFs. Return the content in a clear, structured format keeping all important information including headers, bullet points, and key details." 
+          content: "You are a helpful assistant that organizes raw text extracted from PDFs. Return the content in a clear, structured format keeping all important information including headers, bullet points, tables, and key details. Be thorough and capture all information." 
         },
         { 
           role: "user", 
-          content: [
-            { 
-              type: "text", 
-              text: `Extract all text content from this PDF document. The file is named "${filename}". Return the extracted content in a well-formatted structure.` 
-            },
-            {
-              type: "image_url",
-              image_url: {
-                url: `data:application/pdf;base64,${base64Data}`
-              }
-            }
-          ]
+          content: `I've extracted text from a PDF document named "${filename}". 
+          Please organize and format this content to be well-structured, preserving headings, sections, lists, and tables.
+          Fix any extraction artifacts or formatting issues.
+          
+          EXTRACTED PDF CONTENT:
+          ${extractedText || "No text could be extracted - please analyze based on filename only"}`
         }
       ],
-      temperature: 0.2, // Lower temperature for more factual extraction
-      max_tokens: 4000
+      temperature: 0.1, // Lower temperature for more factual processing
+      max_tokens: 4096
     });
     
-    // Extract content from response
-    const extractedContent = response.choices[0]?.message?.content || "Failed to extract PDF content.";
-    logInfo("PDF content extracted successfully by LLM");
+    // Clean up temp file
+    try {
+      if (fs.existsSync(tempOutputPath)) {
+        fs.unlinkSync(tempOutputPath);
+      }
+    } catch (err) {
+      logWarn(`Could not delete temp file: ${err.message}`);
+    }
     
-    return extractedContent;
+    // Extract content from response
+    const processedContent = response.choices[0]?.message?.content || "Failed to process PDF content.";
+    logInfo("PDF content processed successfully by OpenAI");
+    
+    return processedContent;
   } catch (error) {
-    logError("Error processing PDF with LLM:", error.message);
+    logError("Error processing PDF with OpenAI:", error.message);
     throw error;
   }
 }
 
 /**
- * Generate a summary of document content using LLM
+ * Generate a summary of document content using OpenAI
  * @param {string} content - Document content to summarize
  * @param {string} filename - Name of the file for reference
  * @returns {Promise<string>} Concise summary of the document
@@ -998,39 +1019,39 @@ async function generateDocumentSummary(content, filename) {
     logInfo(`Generating summary for document: ${filename}`);
     
     // Limit content length if too large to avoid token limits
-    const truncatedContent = content.length > 20000 
-      ? content.substring(0, 20000) + "\n\n[Content truncated due to length]" 
+    const truncatedContent = content.length > 30000 
+      ? content.substring(0, 30000) + "\n\n[Content truncated due to length]" 
       : content;
     
-    // Create OpenRouter client for LLM processing
-    const openRouterClient = createOpenRouterClient();
-    
-    // Create a prompt for the LLM to summarize the content
-    const response = await openRouterClient.chat.completions.create({
-      model: LLM_MODEL,
+    // Using OpenAI directly for more reliable summary generation
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o-mini", // Using GPT-4o Mini for efficient summarization
       messages: [
         { 
           role: "system", 
           content: `You are an expert summarizer who distills complex documents into concise, informative summaries. 
                     Your summaries capture key points and main ideas while maintaining factual accuracy.
-                    Format your summary with clear sections, bullet points for key information, and a brief overview.` 
+                    Format your summary with clear sections, bullet points for key information, and a brief overview.
+                    Be thorough but concise - identify the most important information in the document.` 
         },
         { 
           role: "user", 
           content: `Create a comprehensive yet concise summary of this document: "${filename}".
                    Include the most important information, key details, and main points.
+                   Organize the summary by sections or topics found in the document.
+                   Use bullet points for clarity where appropriate.
                    
                    DOCUMENT CONTENT:
                    ${truncatedContent}`
         }
       ],
-      temperature: 0.3,
-      max_tokens: 800
+      temperature: 0.2,
+      max_tokens: 1000
     });
     
     // Extract content from response
     const summary = response.choices[0]?.message?.content || "Failed to generate summary.";
-    logInfo("Document summary generated successfully");
+    logInfo("Document summary generated successfully by OpenAI");
     
     return summary;
   } catch (error) {

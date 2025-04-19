@@ -6,7 +6,12 @@ An intelligent, real-time interview assistant that transcribes and analyzes conv
 
 Meeting Mind is an Electron-based desktop application designed to enhance interview experiences by providing real-time transcription, analysis, and insights. The application captures audio from both the interviewer's microphone and the candidate's voice (via system speaker output), transcribes the conversation using OpenAI's Whisper API, and offers intelligent analysis using large language models.
 
-![Meeting Mind Interface](docs/screenshot.png)
+Interview Call Demo
+![output-1](https://github.com/user-attachments/assets/da755405-1bc5-4b6f-bc45-794f5bfc1159)
+
+Buddy Call Demo
+![output](https://github.com/user-attachments/assets/ec3bf718-5569-4d34-95c5-58b4e1811ed5)
+
 
 ## Key Features
 

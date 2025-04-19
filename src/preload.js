@@ -9,6 +9,11 @@ contextBridge.exposeInMainWorld("electronAPI", {
   // Interview context management
   saveContext: (contextData) => ipcRenderer.invoke("context:save", contextData),
   uploadContextFile: (filePath) => ipcRenderer.invoke("context:upload", filePath),
+  getFilePath: (fileObj) => {
+    // This is a helper function to get file paths from a file object
+    // In most cases, we'll fall back to the main process's file dialog
+    return Promise.resolve(fileObj?.path || null);
+  },
   
   // Interview analysis
   requestAnalysis: () => ipcRenderer.invoke("analysis:request"),

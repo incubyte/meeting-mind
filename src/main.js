@@ -616,17 +616,17 @@ function createOpenRouterClient() {
 }
 
 /**
- * Setup the LLM system prompt for interview assistance
- * Builds a system prompt with provided context
+ * Setup the LLM system prompt for analysis panel
+ * Builds a system prompt with provided context for analysis
  * @returns {string} System prompt for the LLM
  */
-function buildSystemPrompt() {
+function buildAnalysisSystemPrompt() {
   // Start with base system instructions
   let systemPrompt = `
 You are an expert assistant helping someone conduct an effective conversation or interview.
 Your role is to analyze the ongoing conversation in real-time.
 
-When generating content for the "Analysis & Suggestions" panel:
+You are ONLY generating content for the "Analysis & Suggestions" panel:
 Provide brief, scannable analysis with exactly these three sections in this order:
 1. FOLLOWUP QUESTIONS: 2-3 specific questions to ask next based on the conversation context
 2. OBSERVATIONS: 1-2 brief insights about technical accuracy and communication quality
@@ -634,7 +634,24 @@ Provide brief, scannable analysis with exactly these three sections in this orde
 
 Use very concise bullet points. Keep the entire response under 10 lines total.
 
-When generating content for the "Insights" panel:
+IMPORTANT: Do NOT provide Q&A evaluations, extensive answer reviews, or question listings in this panel. Focus only on analysis and forward-looking suggestions.
+`;
+
+  return addContextToPrompt(systemPrompt);
+}
+
+/**
+ * Setup the LLM system prompt for insights panel
+ * Builds a system prompt with provided context for insights
+ * @returns {string} System prompt for the LLM
+ */
+function buildInsightsSystemPrompt() {
+  // Start with base system instructions
+  let systemPrompt = `
+You are an expert assistant helping someone conduct an effective conversation or interview.
+Your role is to analyze the ongoing conversation in real-time.
+
+You are ONLY generating content for the "Insights" panel:
 You must thoroughly analyze the transcript to identify ALL questions and answers, even if they're implicit or brief.
 
 For each question-answer exchange:
@@ -650,6 +667,17 @@ IMPORTANT GUIDELINES:
 - Do not skip any questions - identify and evaluate every Q&A pair
 - Only provide insights when you can identify clear Q&A exchanges - if none exist yet, state "Waiting for complete Q&A exchanges to provide insights."
 `;
+
+  return addContextToPrompt(systemPrompt);
+}
+
+/**
+ * Add context information to a system prompt
+ * @param {string} basePrompt - The base system prompt
+ * @returns {string} System prompt with added context
+ */
+function addContextToPrompt(basePrompt) {
+  let systemPrompt = basePrompt;
 
   // Add document summary if available
   if (interviewContext.documentSummary) {
@@ -777,14 +805,14 @@ async function analyzeInterview(forceTrigger = false) {
   try {
     logInfo("Performing interview analysis...");
     const openRouterClient = createOpenRouterClient();
-    const systemPrompt = buildSystemPrompt();
+    const systemPrompt = buildAnalysisSystemPrompt();
     const formattedTranscript = formatTranscriptForLLM(transcriptBuffer);
 
     const response = await openRouterClient.chat.completions.create({
       model: LLM_MODEL,
       messages: [
         { role: "system", content: systemPrompt },
-        { role: "user", content: `Here is the current interview transcript. Provide your Analysis & Suggestions for the panel:\n\n${formattedTranscript}` }
+        { role: "user", content: `Here is the current interview transcript. Provide ONLY your Analysis & Suggestions for the panel. DO NOT include any Q&A evaluation in this response:\n\n${formattedTranscript}` }
       ],
       temperature: 0.3, // Lower temperature for more focused responses
       max_tokens: 1000
@@ -832,7 +860,7 @@ async function generateInterviewInsights(forceTrigger = false) {
   try {
     logInfo("Generating Q&A insights...");
     const openRouterClient = createOpenRouterClient();
-    const systemPrompt = buildSystemPrompt();
+    const systemPrompt = buildInsightsSystemPrompt();
     const formattedTranscript = formatTranscriptForLLM(transcriptBuffer, 'insights');
 
     // Enhanced prompt for better Q&A identification

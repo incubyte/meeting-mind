@@ -454,7 +454,7 @@ function handleUploadResult(result) {
       requestEarlyAnalysis(result.summary);
       
       contextStatusSpan.textContent = `PDF uploaded and analyzed: ${result.filePath.split('/').pop()}`;
-      addStatusMessage(`PDF uploaded and analyzed. Initial insights provided.`);
+      addStatusMessage(`PDF uploaded and analyzed. Analysis and insights generated.`);
     } else {
       contextStatusSpan.textContent = `File uploaded: ${result.filePath.split('/').pop()}`;
       addStatusMessage(`Context file uploaded successfully.`);

@@ -20,11 +20,9 @@ const saveContextBtn = document.getElementById("saveContextBtn");
 const contextStatusSpan = document.getElementById("contextStatus");
 
 // Analysis elements
-const requestAnalysisBtn = document.getElementById("requestAnalysisBtn");
 const analysisOutputDiv = document.getElementById("analysisOutput");
 
 // Insights elements
-const updateInsightsBtn = document.getElementById("updateInsightsBtn");
 const insightsOutputDiv = document.getElementById("insightsOutput");
 
 let statusLog = ["App Initialized."];
@@ -485,8 +483,7 @@ async function requestEarlyAnalysis(summary) {
         insightsOutputDiv.innerHTML = insightsResult.insights.replace(/\n/g, '<br>');
       }
       
-      // Enable the analysis button
-      requestAnalysisBtn.disabled = false;
+      // Document processed successfully
     }
   } catch (error) {
     addStatusMessage(`Error generating early insights: ${error.message}`);
@@ -514,8 +511,7 @@ saveContextBtn.addEventListener("click", async () => {
       contextStatusSpan.textContent = "Context saved successfully";
       addStatusMessage("Interview context saved successfully.");
       
-      // Enable the analysis button if we have context
-      requestAnalysisBtn.disabled = false;
+      // Context saved successfully
     } else {
       contextStatusSpan.textContent = `Save failed: ${result.error}`;
       addStatusMessage(`Failed to save context: ${result.error}`);
@@ -529,33 +525,6 @@ saveContextBtn.addEventListener("click", async () => {
 });
 
 // --- Analysis ---
-requestAnalysisBtn.addEventListener("click", async () => {
-  if (transcriptBuffer.length === 0) {
-    analysisOutputDiv.innerHTML = "No transcript available yet for analysis.";
-    return;
-  }
-  
-  requestAnalysisBtn.disabled = true;
-  analysisOutputDiv.innerHTML = "Requesting analysis...";
-  
-  try {
-    const result = await window.electronAPI.requestAnalysis();
-    if (result.success) {
-      // Format the analysis result with line breaks
-      const formattedAnalysis = result.analysis.replace(/\n/g, '<br>');
-      analysisOutputDiv.innerHTML = formattedAnalysis;
-    } else {
-      analysisOutputDiv.innerHTML = `Analysis failed: ${result.error}`;
-    }
-  } catch (error) {
-    analysisOutputDiv.innerHTML = `Error performing analysis: ${error.message}`;
-  } finally {
-    // Re-enable after a short delay to prevent spamming
-    setTimeout(() => {
-      requestAnalysisBtn.disabled = false;
-    }, 2000);
-  }
-});
 
 // Add analysis update listener
 window.electronAPI.onAnalysisUpdate((analysisResult) => {
@@ -566,32 +535,6 @@ window.electronAPI.onAnalysisUpdate((analysisResult) => {
 
 // --- Cleanup on unload ---
 // --- Insights ---
-updateInsightsBtn.addEventListener("click", async () => {
-  if (transcriptBuffer.length === 0) {
-    insightsOutputDiv.innerHTML = "No transcript available yet for insights.";
-    return;
-  }
-  
-  updateInsightsBtn.disabled = true;
-  insightsOutputDiv.innerHTML = "Generating insights...";
-  
-  try {
-    const result = await window.electronAPI.requestInsights();
-    if (result.success) {
-      // Format the insights result with line breaks
-      insightsOutputDiv.innerHTML = result.insights.replace(/\n/g, '<br>');
-    } else {
-      insightsOutputDiv.innerHTML = `Insights generation failed: ${result.error}`;
-    }
-  } catch (error) {
-    insightsOutputDiv.innerHTML = `Error generating insights: ${error.message}`;
-  } finally {
-    // Re-enable after a short delay to prevent spamming
-    setTimeout(() => {
-      updateInsightsBtn.disabled = false;
-    }, 2000);
-  }
-});
 
 // Add insights update listener
 window.electronAPI.onInsightsUpdate((insightsResult) => {
@@ -672,7 +615,6 @@ async function handleSaveContext(customContext) {
       
       if (result.success) {
         addStatusMessage("Document context saved successfully.");
-        requestAnalysisBtn.disabled = false;
         return true;
       }
       return false;
@@ -701,8 +643,7 @@ async function handleSaveContext(customContext) {
       contextStatusSpan.textContent = "Context saved successfully";
       addStatusMessage("Call context saved successfully.");
       
-      // Enable the analysis button if we have context
-      requestAnalysisBtn.disabled = false;
+      // Context saved successfully
     } else {
       contextStatusSpan.textContent = `Save failed: ${result.error}`;
       addStatusMessage(`Failed to save context: ${result.error}`);
@@ -717,7 +658,6 @@ async function handleSaveContext(customContext) {
 
 // Initial UI state
 stopRecordingBtn.disabled = true;
-requestAnalysisBtn.disabled = true; // Disabled until context is provided
 
 // Position the threshold indicators for audio levels
 positionThresholdIndicators();

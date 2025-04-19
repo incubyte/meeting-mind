@@ -686,9 +686,23 @@ function formatTranscriptForLLM(transcriptItems, purpose = 'analysis') {
     return `${speaker}: ${item.text}`;
   }).join("\n\n");
   
-  // For insights format, instruct to organize by Q&A
+  // For insights format, provide improved instructions for Q&A detection
   if (purpose === 'insights') {
-    formattedTranscript = `Please analyze the following transcript for Q&A pairs and provide formatted insights for each pair. Focus on the technical accuracy of answers.\n\n${formattedTranscript}`;
+    formattedTranscript = `Please analyze the following transcript and identify all interview questions and answers. 
+
+IMPORTANT INSTRUCTIONS:
+1. Identify ALL questions asked by the Interviewer, even brief or follow-up questions
+2. Each detected question should be paired with its corresponding answer from the Candidate
+3. Format each Q&A pair exactly as follows:
+   - "Q: <interviewer's question>"
+   - "ANSWER REVIEW: <brief assessment of technical accuracy and completeness>"
+   - "CANDIDATE RESPONSE: <summarized response>"
+4. Even if a question is unclear or implicit, still identify it as a separate Q&A pair
+5. If multiple questions are asked consecutively without answers between them, treat them as a single complex question
+6. Do not skip any questions, even if they seem minor or repetitive
+
+Transcript:
+${formattedTranscript}`;
   }
 
   return formattedTranscript;

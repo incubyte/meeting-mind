@@ -486,7 +486,7 @@ async function requestEarlyAnalysis(summary) {
       // Document processed successfully
     }
   } catch (error) {
-    addStatusMessage(`Error generating early insights: ${error.message}`);
+    addStatusMessage(`Error generating early analysis: ${error.message}`);
   }
 }
 
@@ -533,7 +533,6 @@ window.electronAPI.onAnalysisUpdate((analysisResult) => {
   analysisOutputDiv.innerHTML = formattedAnalysis;
 });
 
-// --- Cleanup on unload ---
 // --- Insights ---
 
 // Add insights update listener
@@ -542,6 +541,8 @@ window.electronAPI.onInsightsUpdate((insightsResult) => {
   const formattedInsights = insightsResult.replace(/\n/g, '<br>');
   insightsOutputDiv.innerHTML = formattedInsights;
 });
+
+// --- Cleanup on unload ---
 
 window.addEventListener('beforeunload', () => {
     window.electronAPI.removeAllListeners('transcript:update');

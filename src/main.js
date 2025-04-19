@@ -16,7 +16,7 @@ const execPromise = promisify(exec);
 // OpenRouter API configuration
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY || process.env.OPENAI_API_KEY; // Fallback to OpenAI key if not defined
 const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
-const LLM_MODEL = "anthropic/claude-3-opus-20240229"; // Fast and powerful model - can be changed
+const LLM_MODEL = "google/gemini-2.5-pro-preview-03-25"; // Updated to Gemini Pro model
 
 // Interview assistant configuration
 const ANALYSIS_MODE = true; // Whether to enable interview analysis
@@ -631,13 +631,20 @@ Provide brief, scannable analysis with exactly these three sections in this orde
 Use very concise bullet points. Keep the entire response under 10 lines total.
 
 When generating content for the "Interview Insights" panel:
-Organize insights by question-answer pairs. For each Q&A exchange:
-1. Show the question asked (format: "Q: <interviewer's question>")
-2. Evaluate the candidate's answer with this format:
-   "ANSWER REVIEW: <brief assessment of technical accuracy and completeness>"
-   "CANDIDATE RESPONSE: <summarized response>"
+You must thoroughly analyze the transcript to identify ALL questions and answers, even if they're implicit or brief.
 
-Focus on evaluating the technical accuracy of answers. If no clear question-answer pattern exists yet, state "Waiting for complete Q&A exchanges to provide insights."
+For each question-answer exchange:
+1. Identify the interviewer's question (even brief ones or follow-ups) and format as: "Q: <interviewer's question>"
+2. Evaluate the candidate's answer with this format:
+   "ANSWER REVIEW: <assessment of technical accuracy and completeness>"
+   "CANDIDATE RESPONSE: <concise summary of response>"
+
+IMPORTANT GUIDELINES:
+- Detect ALL questions in the conversation, including brief follow-ups
+- Look for question patterns like "Tell me about...", "How would you...", "What if...", etc.
+- If multiple questions are asked consecutively without answers between them, treat them as a single complex question
+- Do not skip any questions - identify and evaluate every Q&A pair
+- Only provide insights when you can identify clear Q&A exchanges - if none exist yet, state "Waiting for complete Q&A exchanges to provide insights."
 `;
 
   // Add job description if available
@@ -809,14 +816,31 @@ async function generateInterviewInsights(forceTrigger = false) {
     const systemPrompt = buildSystemPrompt();
     const formattedTranscript = formatTranscriptForLLM(transcriptBuffer, 'insights');
 
+    // Enhanced prompt for better Q&A identification
+    const userPrompt = `Thoroughly analyze this interview transcript and identify ALL question-answer pairs.
+
+YOUR TASK:
+1. Identify EVERY question asked by the interviewer, even brief follow-ups or clarifications
+2. For each question, evaluate the corresponding answer
+3. Format your response as a series of Q&A evaluations
+
+Remember to:
+- Include ALL questions, even if they seem minor
+- Look for question patterns like "Tell me about...", "How would you...", "What if...", "Could you explain..."
+- Do not merge or skip any questions unless they were asked consecutively with no answer between them
+- Detect implicit questions that don't end with a question mark
+
+Transcript for analysis:
+${formattedTranscript}`;
+
     const response = await openRouterClient.chat.completions.create({
       model: LLM_MODEL,
       messages: [
         { role: "system", content: systemPrompt },
-        { role: "user", content: `Generate Interview Insights (Q&A evaluations) for the panel based on this transcript:\n\n${formattedTranscript}` }
+        { role: "user", content: userPrompt }
       ],
-      temperature: 0.3, // Lower temperature for more focused responses
-      max_tokens: 1500
+      temperature: 0.2, // Lower temperature for more precise analysis
+      max_tokens: 2000  // Increased for more comprehensive analysis
     });
 
     // Extract and return the insights

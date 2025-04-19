@@ -1,10 +1,6 @@
-# Meeting Mind
+# Meeting Mind 🧠
 
-An intelligent, real-time interview assistant that transcribes and analyzes conversations using advanced voice activity detection and AI processing.
-
-## Overview
-
-Meeting Mind is an Electron-based desktop application designed to enhance interview experiences by providing real-time transcription, analysis, and insights. The application captures audio from both the interviewer's microphone and the candidate's voice (via system speaker output), transcribes the conversation using OpenAI's Whisper API, and offers intelligent analysis using large language models.
+A smart conversation assistant that transcribes and analyzes discussions in real-time using voice activity detection and AI processing.
 
 Interview Call Demo
 ![output-1](https://github.com/user-attachments/assets/da755405-1bc5-4b6f-bc45-794f5bfc1159)
@@ -13,95 +9,58 @@ Buddy Call Demo
 ![output](https://github.com/user-attachments/assets/ec3bf718-5569-4d34-95c5-58b4e1811ed5)
 
 
-## Key Features
+## 🌟 Overview
 
-- **Dual-Stream Audio Capture**: Records both local microphone and system audio output simultaneously
-- **Intelligent Voice Activity Detection (VAD)**: Detects natural speech patterns and utterances
+Meeting Mind is an Electron-based desktop application designed to enhance professional conversations by providing real-time transcription, analysis, and insights. The application captures audio from both your microphone (Speaker 1) and system output (Speaker 2), transcribes the conversation using OpenAI's Whisper API, and offers intelligent analysis using Google's Gemini Pro model.
+
+## 📚 Documentation
+
+- [🚀 Getting Started](docs/getting-started.md) - Installation and setup
+- [💻 Technical Overview](docs/technical-overview.md) - Architecture and components
+- [📝 User Guide](docs/user-guide.md) - How to use the application
+- [🔧 Configuration](docs/configuration.md) - Configuring the application
+- [📊 Development Guide](docs/development.md) - Contributing to the project
+- [✅ Requirements](docs/requirements.md) - System requirements
+
+## ✨ Key Features
+
+- **Dual-Stream Audio Capture**: Records both microphone and system audio output simultaneously
+- **Intelligent Voice Activity Detection**: Detects natural speech patterns and utterances
 - **Real-Time Transcription**: Converts speech to text using OpenAI's Whisper API
-- **Interview Analysis**: Provides suggestions for follow-up questions and observations about candidate responses
+- **Conversation Analysis**: Provides suggestions, follow-up questions, and observations
 - **Q&A Insights**: Automatically identifies question-answer pairs and evaluates responses
 - **Chat-Like Interface**: Presents transcribed conversation in an easy-to-follow format
-- **Audio Level Visualization**: Shows real-time audio levels for both microphone and speaker
+- **Audio Level Visualization**: Shows real-time audio levels for both speakers
+- **Contextual Understanding**: Upload documents or specify context for better analysis
 
-## System Requirements
+## 🧩 Use Cases
 
-- **Operating System**: Linux (PulseAudio audio system required)
-- **Node.js**: v14 or higher
-- **Dependencies**: 
-  - OpenAI API key (for transcription and analysis)
-  - PulseAudio (for audio device management)
+- **Technical Interviews**: Assist interviewers with follow-up questions and candidate evaluation
+- **Sales Calls**: Get insights and suggestions during customer conversations
+- **1:1 Meetings**: Better track discussions with team members
+- **Custom Conversations**: Create your own conversation types with specific contexts
 
-## Installation
+## 🖼️ Screenshots
 
-1. Clone the repository:
-   ```
-   git clone https://github.com/yourusername/meeting-mind.git
-   cd meeting-mind
-   ```
+<details>
+<summary>Click to expand screenshots</summary>
 
-2. Install dependencies:
-   ```
-   npm install
-   ```
+### Main Interface
+![Main Interface](docs/screenshot.png)
 
-3. Create a `.env` file in the project root with your OpenAI API key:
-   ```
-   OPENAI_API_KEY=your_api_key_here
-   ```
+### Analysis Panel
+![Analysis Panel](docs/analysis.png)
 
-4. Build the CSS (only needed for the first run):
-   ```
-   npm run tailwind:build
-   ```
+### Settings View
+![Settings View](docs/settings.png)
 
-5. Start the application:
-   ```
-   npm run dev
-   ```
+</details>
 
-## Usage
-
-1. **Test Audio Devices**: Click the "Test Audio" button to verify your microphone and speaker loopback device are properly detected.
-
-2. **Set Interview Context** (Optional): Enter job description, candidate information, or other contextual details to improve the AI analysis.
-
-3. **Start Recording**: Click the "Start" button to begin recording the conversation.
-
-4. **Conduct Interview**: As the conversation progresses, the application will transcribe speech in real-time and display it in the chat interface.
-
-5. **Review Analysis**: Check the "Analysis & Suggestions" panel for recommended follow-up questions and observations.
-
-6. **View Insights**: The "Insights" panel shows structured Q&A evaluations of the conversation.
-
-7. **Stop Recording**: Click "Stop" when the interview is complete.
-
-8. **Download Transcript**: Save the conversation transcript for later reference.
-
-## Architecture
-
-Meeting Mind uses a modular architecture with several key components:
-
-- **Audio Capture Subsystem**: Manages audio recording from multiple sources
-- **Voice Activity Detection Engine**: Processes audio streams to identify speech
-- **Transcription Pipeline**: Converts speech to text using OpenAI's Whisper API
-- **Analysis Engine**: Generates insights using LLM models (Gemini Pro)
-- **UI Layer**: Electron-based interface for displaying transcripts and insights
-
-For more detailed information about the architecture, see [Architecture.md](Architecture.md).
-
-## Technical Details
-
-For a deep dive into the technical implementation, including audio processing, voice activity detection algorithms, and the transcription pipeline, see [Technical_Overview.md](Technical_Overview.md).
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
-
-## License
+## 📄 License
 
 ISC
 
-## Acknowledgments
+## 🙏 Acknowledgments
 
 - OpenAI for the Whisper API
 - Google for the Gemini Pro model
